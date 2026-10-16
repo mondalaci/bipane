@@ -22,6 +22,7 @@ const api: BipaneApi = {
     resize: (id: string, cols: number, rows: number) =>
       ipcRenderer.send('pty:resize', id, cols, rows),
     kill: (id: string) => ipcRenderer.send('pty:kill', id),
+    state: (id: string) => ipcRenderer.invoke('pty:state', id),
     onData: (handler: (event: PtyDataEvent) => void) => {
       const listener = (_event: IpcRendererEvent, payload: PtyDataEvent) => handler(payload)
       ipcRenderer.on('pty:data', listener)

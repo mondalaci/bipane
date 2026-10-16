@@ -3,6 +3,7 @@ import type {
   PtyDataEvent,
   PtyExitEvent,
   PtySpawnOptions,
+  PtyStateSnapshot,
   Result
 } from './types'
 
@@ -18,6 +19,7 @@ export interface BipanePtyApi {
   write(id: string, data: string): void
   resize(id: string, cols: number, rows: number): void
   kill(id: string): void
+  state(id: string): Promise<PtyStateSnapshot>
   onData(handler: (event: PtyDataEvent) => void): () => void
   onExit(handler: (event: PtyExitEvent) => void): () => void
 }

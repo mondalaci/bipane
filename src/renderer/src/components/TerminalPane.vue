@@ -2,8 +2,8 @@
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
+import { useShell } from '@renderer/composables/useShell'
 
-const SESSION_ID = 'main'
 const MONO_FONT = "'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, Consolas, monospace"
 
 const props = defineProps<{ open: boolean; cwd: string }>()
@@ -13,14 +13,16 @@ const emit = defineEmits<{
   (event: 'close'): void
 }>()
 
+const shell = useShell()
+
 const root = ref<HTMLElement | null>(null)
 const host = ref<HTMLElement | null>(null)
 
 let term: Terminal | null = null
 let fitAddon: FitAddon | null = null
 let observer: ResizeObserver | null = null
-let disposers: Array<() => void> = []
-let started = false
+let detach: (() => void) | null = null
+let termReady = false
 let pendingFrame = 0
 
 function refit(): void {
@@ -28,7 +30,7 @@ function refit(): void {
   const element = host.value
   if (!element || element.clientWidth === 0 || element.clientHeight === 0) return
   fitAddon.fit()
-  window.bipane.pty.resize(SESSION_ID, term.cols, term.rows)
+  shell.resize(term.cols, term.rows)
 }
 
 function scheduleRefit(): void {
@@ -40,9 +42,9 @@ function focusTerminal(): void {
   void nextTick(() => term?.focus())
 }
 
-function start(): void {
-  if (started || !host.value) return
-  started = true
+function startTerminal(): void {
+  if (termReady || !host.value) return
+  termReady = true
 
   term = new Terminal({
     cursorBlink: true,
@@ -80,9 +82,8 @@ function start(): void {
   fitAddon = new FitAddon()
   term.loadAddon(fitAddon)
   term.open(host.value)
-  refit()
 
-  term.onData((data) => window.bipane.pty.write(SESSION_ID, data))
+  term.onData((data) => shell.write(data))
 
   term.attachCustomKeyEventHandler((event) => {
     const isTerminalToggle =
@@ -94,20 +95,18 @@ function start(): void {
     return !isTerminalToggle
   })
 
-  disposers = [
-    window.bipane.pty.onData((event) => {
-      if (event.id === SESSION_ID) term?.write(event.data)
-    }),
-    window.bipane.pty.onExit((event) => {
-      if (event.id !== SESSION_ID) return
-      term?.write(`\r\n\x1b[90m[process exited with code ${event.exitCode}]\x1b[0m\r\n`)
-    })
-  ]
+  // Subscribe before starting so nothing the shell emits is missed, then replay
+  // whatever it produced before this terminal existed.
+  const attached = shell.attachTerminal(
+    (data) => term?.write(data),
+    (code) => term?.write(`\r\n\x1b[90m[process exited with code ${code}]\x1b[0m\r\n`)
+  )
+  detach = attached.detach
+  if (attached.initial) term.write(attached.initial)
 
-  void window.bipane.pty.create(SESSION_ID, {
-    cwd: props.cwd,
-    cols: term.cols,
-    rows: term.rows
+  void shell.ensureStarted(props.cwd).then(() => {
+    refit()
+    scheduleRefit()
   })
 }
 
@@ -118,7 +117,7 @@ watch(
       emit('focused-change', false)
       return
     }
-    start()
+    startTerminal()
     void nextTick(() => {
       refit()
       focusTerminal()
@@ -132,7 +131,7 @@ onMounted(() => {
   if (root.value) observer.observe(root.value)
 
   if (props.open) {
-    start()
+    startTerminal()
     void nextTick(() => {
       refit()
       focusTerminal()
@@ -143,8 +142,10 @@ onMounted(() => {
 onBeforeUnmount(() => {
   cancelAnimationFrame(pendingFrame)
   observer?.disconnect()
-  for (const dispose of disposers) dispose()
-  window.bipane.pty.kill(SESSION_ID)
+  observer = null
+  detach?.()
+  detach = null
+  shell.kill()
   term?.dispose()
   term = null
   fitAddon = null

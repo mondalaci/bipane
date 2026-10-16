@@ -22,15 +22,17 @@ There is no linter or test runner configured yet.
 ```
 src/main/index.ts        window lifecycle, single-instance lock
 src/main/ipc/fs.ts       IPC: fs:home, fs:list, fs:open, fs:reveal
-src/main/ipc/pty.ts      IPC: pty:create/write/resize/kill, pushes pty:data, pty:exit
+src/main/ipc/pty.ts      IPC: pty:create/write/resize/kill/state, pushes pty:data, pty:exit
 src/main/ipc/window.ts   IPC: window:minimize/toggle-maximize/close/is-maximized
 src/preload/index.ts     contextBridge -> window.bipane (implements BipaneApi)
 src/shared/types.ts      DirEntry/DirListing/Result/Pty* types (main + renderer)
 src/shared/api.ts        BipaneApi interface (the preload contract)
-src/renderer/src/App.vue global keyboard model, layout, terminal toggle
+src/renderer/src/App.vue global keyboard model, layout, focus, cwd sync
 src/renderer/src/components/TitleBar.vue     frameless title bar + window controls
 src/renderer/src/components/FilePanel.vue    one pane: path bar, list, footer
-src/renderer/src/components/TerminalPane.vue xterm instance bound to one pty
+src/renderer/src/components/TerminalPane.vue xterm view over the shared shell
+src/renderer/src/components/CommandLine.vue  bottom command line input
+src/renderer/src/composables/useShell.ts     the single shared shell session
 src/renderer/src/composables/useDirectory.ts per-pane navigation state + actions
 src/renderer/src/lib/format.ts               size/date/permission formatting
 ```
@@ -38,6 +40,11 @@ src/renderer/src/lib/format.ts               size/date/permission formatting
 Keys: `Tab` switches panes, arrows/`Home`/`End`/`PgUp`/`PgDn` move the cursor,
 `Enter` descends or opens, `Backspace` goes up, `Ctrl+O` toggles the terminal,
 `Alt+S` starts an incremental search.
+
+The bottom command line feeds the same shell as the terminal: printable
+characters go there whenever the terminal does not hold focus, and `Enter`
+runs the typed command instead of activating the panel entry. `Backspace`
+returns to its "go up" meaning once the command line is empty.
 
 ## Gotchas
 
@@ -72,6 +79,20 @@ Keys: `Tab` switches panes, arrows/`Home`/`End`/`PgUp`/`PgDn` move the cursor,
 - **The pane's row list must contain only entries.** A status message rendered
   as a sibling `<li>` shifts every index, which silently breaks cursor scrolling
   and page jumps; `FilePanel` renders that notice as a sibling of the `<ul>`.
+- **The panel and the shell keep their cwd in sync in both directions**, which
+  is why it needs a guard: the shell's cwd is *polled* (300ms), so a read can be
+  stale for a moment after we inject a `cd`. `pendingPush` in `App.vue` marks the
+  path we asked for so those stale reads are ignored rather than bouncing the
+  panel back. The injection is also gated on `pty:state` reporting the shell is
+  at a prompt — writing mid-command feeds the text to whatever is running.
+- **`pty:state` is Linux-only** (`/proc/<pid>/cwd` for the cwd, `tpgid` in
+  `/proc/<pid>/stat` to tell whether the shell is at a prompt). Elsewhere it
+  reports `idle: false`, which disables injection rather than guessing.
+- **Focus model:** the command line holds focus whenever the terminal does not,
+  so `focusPanes()` *focuses the command line* rather than blurring. The search
+  box and the terminal are the other two focus targets. Navigation keys are
+  intercepted in the window capture handler; editing keys are left to whichever
+  input owns them.
 - **Tailwind v4 is configured CSS-first** (`@theme` in
   `src/renderer/src/styles/main.css`). There is no `tailwind.config.js`.
   Theme tokens are the design system — prefer `bg-surface`, `text-fg-dim`,

@@ -1,13 +1,19 @@
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync, readlinkSync } from 'node:fs'
 import * as os from 'node:os'
 import { ipcMain, type WebContents } from 'electron'
 import * as pty from 'node-pty'
-import type { PtyDataEvent, PtyExitEvent, PtySpawnOptions } from '@shared/types'
+import type {
+  PtyDataEvent,
+  PtyExitEvent,
+  PtySpawnOptions,
+  PtyStateSnapshot
+} from '@shared/types'
 
 interface PtySession {
   id: string
   proc: pty.IPty
   owner: WebContents
+  pid: number
 }
 
 const sessions = new Map<string, PtySession>()
@@ -26,6 +32,36 @@ function shellEnv(): Record<string, string> {
   env.TERM = 'xterm-256color'
   env.COLORTERM = 'truecolor'
   return env
+}
+
+function readProcessCwd(pid: number): string | null {
+  if (process.platform !== 'linux') return null
+  try {
+    return readlinkSync(`/proc/${pid}/cwd`)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * True when the shell itself owns the terminal's foreground process group,
+ * i.e. it is sitting at a prompt rather than running a child command. That is
+ * the only state in which injecting a command is safe.
+ */
+function isShellAtPrompt(pid: number): boolean {
+  if (process.platform !== 'linux') return false
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8')
+    const closing = stat.lastIndexOf(')')
+    if (closing < 0) return false
+
+    // Everything after "comm) " starts at field 3 (state); tpgid is field 8.
+    const fields = stat.slice(closing + 2).split(' ')
+    const tpgid = Number(fields[5])
+    return Number.isFinite(tpgid) && tpgid === pid
+  } catch {
+    return false
+  }
 }
 
 function killSession(id: string): void {
@@ -59,7 +95,7 @@ export function registerPtyHandlers(): void {
     })
 
     const owner = event.sender
-    sessions.set(id, { id, proc, owner })
+    sessions.set(id, { id, proc, owner, pid: proc.pid })
 
     proc.onData((data) => {
       if (owner.isDestroyed()) return
@@ -96,6 +132,15 @@ export function registerPtyHandlers(): void {
   })
 
   ipcMain.on('pty:kill', (_event, id: string) => killSession(id))
+
+  ipcMain.handle('pty:state', (_event, id: string): PtyStateSnapshot => {
+    const session = sessions.get(id)
+    if (!session) return { cwd: null, idle: false }
+    return {
+      cwd: readProcessCwd(session.pid),
+      idle: isShellAtPrompt(session.pid)
+    }
+  })
 }
 
 export function killAllSessions(): void {

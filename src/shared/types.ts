@@ -49,3 +49,8 @@ export interface PtyExitEvent {
   exitCode: number
   signal: number | undefined
 }
+
+export interface PtyStateSnapshot {
+  cwd: string | null
+  idle: boolean
+}
