@@ -8,12 +8,20 @@ import { ref } from 'vue'
 const SESSION_ID = 'main'
 const POLL_INTERVAL_MS = 300
 const MAX_BUFFER_LENGTH = 200_000
-const SPAWN_COLS = 120
-const SPAWN_ROWS = 30
 
 const started = ref(false)
 const cwd = ref<string | null>(null)
 const idle = ref(false)
+/**
+ * What the shell's input line currently holds. We model it from the bytes
+ * xterm sends, because the command line *is* the shell: the alternative is
+ * poking at the terminal buffer, which cannot tell where the prompt ends.
+ * Only emptiness matters, so a simple append/backspace model stays accurate
+ * even when readline's own caret moves behind our back.
+ */
+const inputLine = ref('')
+
+let lineBuffer = ''
 
 const dataListeners = new Set<(data: string) => void>()
 const exitListeners = new Set<(code: number) => void>()
@@ -60,13 +68,13 @@ function teardown(): void {
   idle.value = false
 }
 
-export function ensureStarted(spawnCwd: string): Promise<void> {
+export function ensureStarted(spawnCwd: string, cols: number, rows: number): Promise<void> {
   if (startPromise) return startPromise
 
   const created = window.bipane.pty.create(SESSION_ID, {
     cwd: spawnCwd,
-    cols: SPAWN_COLS,
-    rows: SPAWN_ROWS
+    cols: Math.max(cols, 2),
+    rows: Math.max(rows, 1)
   })
 
   let cancelled = false
@@ -104,6 +112,40 @@ export function write(data: string): void {
   window.bipane.pty.write(SESSION_ID, data)
 }
 
+function noteInput(data: string): void {
+  for (const char of data) {
+    const code = char.codePointAt(0) ?? 0
+
+    if (code === 13 || code === 10 || code === 3 || code === 21) {
+      lineBuffer = ''
+      continue
+    }
+    if (code === 127 || code === 8) {
+      lineBuffer = lineBuffer.slice(0, -1)
+      continue
+    }
+    if (code === 23) {
+      lineBuffer = lineBuffer.replace(/\s*\S*$/, '')
+      continue
+    }
+    if (code === 27) break
+    if (code < 32) continue
+    lineBuffer += char
+  }
+
+  inputLine.value = lineBuffer
+}
+
+/** Sends input we originate, keeping the line model in step. */
+export function sendInput(data: string): void {
+  noteInput(data)
+  write(data)
+}
+
+export function clearInputLine(): void {
+  sendInput('\u0015')
+}
+
 export function resize(cols: number, rows: number): void {
   if (!started.value) return
   window.bipane.pty.resize(SESSION_ID, cols, rows)
@@ -133,5 +175,18 @@ export function kill(): void {
 }
 
 export function useShell() {
-  return { started, cwd, idle, ensureStarted, write, resize, attachTerminal, kill }
+  return {
+    started,
+    cwd,
+    idle,
+    inputLine,
+    ensureStarted,
+    write,
+    sendInput,
+    clearInputLine,
+    noteInput,
+    resize,
+    attachTerminal,
+    kill
+  }
 }

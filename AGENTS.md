@@ -30,8 +30,9 @@ src/shared/api.ts        BipaneApi interface (the preload contract)
 src/renderer/src/App.vue global keyboard model, layout, focus, cwd sync
 src/renderer/src/components/TitleBar.vue     frameless title bar + window controls
 src/renderer/src/components/FilePanel.vue    one pane: path bar, list, footer
-src/renderer/src/components/TerminalPane.vue xterm view over the shared shell
-src/renderer/src/components/CommandLine.vue  bottom command line input
+src/renderer/src/components/TerminalPane.vue xterm over the shared shell: the
+                                             collapsed command line and, when
+                                             expanded, the full terminal
 src/renderer/src/composables/useShell.ts     the single shared shell session
 src/renderer/src/composables/useDirectory.ts per-pane navigation state + actions
 src/renderer/src/lib/format.ts               size/date/permission formatting
@@ -41,10 +42,13 @@ Keys: `Tab` switches panes, arrows/`Home`/`End`/`PgUp`/`PgDn` move the cursor,
 `Enter` descends or opens, `Backspace` goes up, `Ctrl+O` toggles the terminal,
 `Alt+S` starts an incremental search.
 
-The bottom command line feeds the same shell as the terminal: printable
-characters go there whenever the terminal does not hold focus, and `Enter`
-runs the typed command instead of activating the panel entry. `Backspace`
-returns to its "go up" meaning once the command line is empty.
+The bottom strip is the shell itself: the same xterm, collapsed to three rows,
+so the prompt, font and echo are the shell's own rather than a look-alike
+widget. `Ctrl+O` expands it into the full terminal, which then owns the
+keyboard outright. While it is collapsed, printable characters go to the shell
+and navigation keys still drive the panels; `Enter` runs the typed line, or
+activates the panel entry when the line is empty, and `Backspace` returns to
+its "go up" meaning once the line is empty.
 
 ## Gotchas
 
@@ -88,6 +92,16 @@ returns to its "go up" meaning once the command line is empty.
 - **`pty:state` is Linux-only** (`/proc/<pid>/cwd` for the cwd, `tpgid` in
   `/proc/<pid>/stat` to tell whether the shell is at a prompt). Elsewhere it
   reports `idle: false`, which disables injection rather than guessing.
+- **The collapsed strip is the shell, so its input line is state we model.**
+  `useShell.inputLine` is fed from xterm's `onData`. It decides whether `Enter`
+  runs the line or activates the panel entry, whether `Backspace` goes up, and
+  it stops the cwd sync from injecting a `cd` into a half-typed command.
+- **Panel -> shell cwd sync is visible**: it types `cd '<path>'` at the prompt,
+  so the shell echoes it. Gating on an empty line keeps it from corrupting a
+  command, but the echo is shown. Suppressing it is not possible while sharing
+  one PTY, which is the trade-off for the strip being the real shell.
+- **The terminal is killed on unmount**, so a dev-mode HMR update of
+  `TerminalPane.vue` kills the running shell and spawns a fresh one.
 - **Focus model:** the command line holds focus whenever the terminal does not,
   so `focusPanes()` *focuses the command line* rather than blurring. The search
   box and the terminal are the other two focus targets. Navigation keys are

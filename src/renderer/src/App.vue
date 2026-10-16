@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import CommandLine from '@renderer/components/CommandLine.vue'
 import FilePanel from '@renderer/components/FilePanel.vue'
 import StatusBar from '@renderer/components/StatusBar.vue'
 import TerminalPane from '@renderer/components/TerminalPane.vue'
@@ -16,12 +15,13 @@ const shell = useShell()
 const shellCwd = shell.cwd
 const shellIdle = shell.idle
 const shellStarted = shell.started
+const shellInput = shell.inputLine
 
 const activeSide = ref<PanelSide>('left')
-const terminalOpen = ref(false)
+const terminalExpanded = ref(false)
 const terminalFocused = ref(false)
-const commandText = ref('')
-const commandLine = ref<InstanceType<typeof CommandLine> | null>(null)
+const panelHost = ref<HTMLElement | null>(null)
+const terminalRef = ref<InstanceType<typeof TerminalPane> | null>(null)
 
 const activePane = computed(() => (activeSide.value === 'left' ? left : right))
 const activePanePath = computed(() => activePane.value.state.path)
@@ -34,37 +34,29 @@ function setActive(side: PanelSide): void {
   activeSide.value = side
 }
 
-function focusCommandLine(): void {
-  commandLine.value?.focus()
-}
-
 /**
- * The command line holds focus whenever the terminal does not, so printable
- * characters land there while navigation keys are intercepted globally.
+ * Collapsed, the strip is the command line and holds focus so typing reaches
+ * the shell. Expanded, it is a real terminal and owns the keyboard outright.
  */
-function syncFocus(): void {
-  if (terminalOpen.value && terminalFocused.value) return
-  focusCommandLine()
-}
-
 function focusPanes(): void {
-  const active = document.activeElement
-  if (active instanceof HTMLElement) active.blur()
-  syncFocus()
+  if (terminalExpanded.value) {
+    panelHost.value?.focus()
+    return
+  }
+  terminalRef.value?.focusTerminal()
 }
 
 function toggleTerminal(): void {
-  terminalOpen.value = !terminalOpen.value
-  if (!terminalOpen.value) {
-    terminalFocused.value = false
-    syncFocus()
+  if (terminalExpanded.value) {
+    collapseTerminal()
+    return
   }
+  terminalExpanded.value = true
 }
 
-function closeTerminal(): void {
-  terminalOpen.value = false
-  terminalFocused.value = false
-  syncFocus()
+function collapseTerminal(): void {
+  terminalExpanded.value = false
+  void nextTick(() => terminalRef.value?.focusTerminal())
 }
 
 function toggleSearch(): void {
@@ -79,26 +71,13 @@ watch(activeSide, (side) => {
   inactive.closeSearch()
 })
 
-// Leaving search mode hands focus back to the command line.
 watch(
   () => left.state.searchActive || right.state.searchActive,
   (anyActive, wasActive) => {
-    if (wasActive && !anyActive) syncFocus()
+    if (!wasActive || anyActive) return
+    if (!terminalExpanded.value) terminalRef.value?.focusTerminal()
   }
 )
-
-async function runCommand(): Promise<void> {
-  const line = commandText.value
-  if (!line.trim()) return
-  commandText.value = ''
-
-  if (!terminalOpen.value) terminalOpen.value = true
-  await nextTick()
-
-  await shell.ensureStarted(activePanePath.value)
-  shell.write(`${line}\r`)
-  focusCommandLine()
-}
 
 /**
  * cwd sync runs both ways, which needs care: the shell's cwd is polled, so a
@@ -117,9 +96,10 @@ function clearPendingPush(): void {
 }
 
 function pushCwdToShell(): void {
-  // Never inject into a shell that is busy: it would corrupt whatever is
-  // running (a REPL, an editor, a password prompt).
+  // Never write into a shell that is busy, or into a half-typed command line:
+  // the text would be fed to whatever is running, or appended to the command.
   if (!shellStarted.value || !shellIdle.value) return
+  if (shellInput.value.length > 0) return
 
   const target = activePanePath.value
   if (!target || target === shellCwd.value || target === pendingPush) return
@@ -131,7 +111,7 @@ function pushCwdToShell(): void {
   shell.write(`cd ${shellQuote(target)}\r`)
 }
 
-watch([activePanePath, shellIdle, shellStarted], pushCwdToShell)
+watch([activePanePath, shellIdle, shellStarted, shellInput], pushCwdToShell)
 
 watch(shellCwd, (next) => {
   if (!next) return
@@ -148,7 +128,7 @@ watch(shellCwd, (next) => {
 function handlePaneKey(event: KeyboardEvent): void {
   const pane = activePane.value
   const searching = pane.state.searchActive
-  const hasCommand = commandText.value.length > 0
+  const hasInput = shellInput.value.length > 0
 
   if (event.key === 'Tab') {
     event.preventDefault()
@@ -164,18 +144,17 @@ function handlePaneKey(event: KeyboardEvent): void {
       pane.closeSearch()
       return
     }
-    if (hasCommand) {
-      commandText.value = ''
+    if (hasInput) {
+      shell.clearInputLine()
       return
     }
-    if (terminalOpen.value) closeTerminal()
+    if (terminalExpanded.value) collapseTerminal()
     return
   }
 
-  // The search box and the command line own their own editing while they have
-  // text to edit; otherwise Backspace keeps its "go up" meaning.
+  // While there is a line to edit, the shell's own line editing keeps it.
   if (searching && (event.key === 'Backspace' || event.key === 'Delete')) return
-  if (event.key === 'Backspace' && hasCommand) return
+  if (event.key === 'Backspace' && hasInput) return
 
   if (event.repeat && (event.key === 'Enter' || event.key === 'Backspace')) {
     event.preventDefault()
@@ -208,9 +187,13 @@ function handlePaneKey(event: KeyboardEvent): void {
       pane.moveTo(pane.state.entries.length - 1)
       break
     case 'Enter':
+      if (hasInput) {
+        // Fall through to the shell, but give the output room to be seen.
+        if (!terminalExpanded.value) terminalExpanded.value = true
+        return
+      }
       event.preventDefault()
-      if (hasCommand) void runCommand()
-      else void pane.activate()
+      void pane.activate()
       break
     case 'Backspace':
       event.preventDefault()
@@ -250,7 +233,8 @@ function onKeydown(event: KeyboardEvent): void {
     return
   }
 
-  if (terminalOpen.value && terminalFocused.value) return
+  // Expanded and focused means it is a real terminal: it owns the keyboard.
+  if (terminalExpanded.value && terminalFocused.value) return
 
   handlePaneKey(event)
 }
@@ -259,7 +243,6 @@ onMounted(() => {
   window.addEventListener('keydown', onKeydown, { capture: true })
   void left.init()
   void right.init()
-  focusCommandLine()
 })
 
 onBeforeUnmount(() => {
@@ -269,9 +252,9 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="flex h-full flex-col overflow-hidden bg-bg text-fg select-none">
-    <TitleBar :terminal-open="terminalOpen" @toggle-terminal="toggleTerminal" />
+    <TitleBar :terminal-open="terminalExpanded" @toggle-terminal="toggleTerminal" />
 
-    <main class="flex min-h-0 flex-1">
+    <main ref="panelHost" tabindex="-1" class="flex min-h-0 flex-1 outline-none">
       <FilePanel
         :controller="left"
         :active="activeSide === 'left'"
@@ -288,14 +271,13 @@ onBeforeUnmount(() => {
     </main>
 
     <TerminalPane
-      :open="terminalOpen"
+      ref="terminalRef"
+      :expanded="terminalExpanded"
       :cwd="activePanePath"
       @focused-change="terminalFocused = $event"
-      @close="closeTerminal"
+      @collapse="collapseTerminal"
     />
 
-    <CommandLine ref="commandLine" v-model="commandText" :cwd="shellCwd" />
-
-    <StatusBar :pane="activePane" :active-side="activeSide" :terminal-open="terminalOpen" />
+    <StatusBar :pane="activePane" :active-side="activeSide" :terminal-open="terminalExpanded" />
   </div>
 </template>

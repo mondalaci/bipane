@@ -6,11 +6,11 @@ import { useShell } from '@renderer/composables/useShell'
 
 const MONO_FONT = "'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, Consolas, monospace"
 
-const props = defineProps<{ open: boolean; cwd: string }>()
+const props = defineProps<{ expanded: boolean; cwd: string }>()
 
 const emit = defineEmits<{
   (event: 'focused-change', value: boolean): void
-  (event: 'close'): void
+  (event: 'collapse'): void
 }>()
 
 const shell = useShell()
@@ -26,7 +26,7 @@ let termReady = false
 let pendingFrame = 0
 
 function refit(): void {
-  if (!term || !fitAddon || !props.open) return
+  if (!term || !fitAddon) return
   const element = host.value
   if (!element || element.clientWidth === 0 || element.clientHeight === 0) return
   fitAddon.fit()
@@ -48,7 +48,7 @@ function startTerminal(): void {
 
   term = new Terminal({
     cursorBlink: true,
-    cursorStyle: 'bar',
+    cursorStyle: 'block',
     fontFamily: MONO_FONT,
     fontSize: 12,
     lineHeight: 1.25,
@@ -82,8 +82,12 @@ function startTerminal(): void {
   fitAddon = new FitAddon()
   term.loadAddon(fitAddon)
   term.open(host.value)
+  refit()
 
-  term.onData((data) => shell.write(data))
+  term.onData((data) => {
+    shell.noteInput(data)
+    shell.write(data)
+  })
 
   term.attachCustomKeyEventHandler((event) => {
     const isTerminalToggle =
@@ -95,8 +99,6 @@ function startTerminal(): void {
     return !isTerminalToggle
   })
 
-  // Subscribe before starting so nothing the shell emits is missed, then replay
-  // whatever it produced before this terminal existed.
   const attached = shell.attachTerminal(
     (data) => term?.write(data),
     (code) => term?.write(`\r\n\x1b[90m[process exited with code ${code}]\x1b[0m\r\n`)
@@ -104,23 +106,18 @@ function startTerminal(): void {
   detach = attached.detach
   if (attached.initial) term.write(attached.initial)
 
-  void shell.ensureStarted(props.cwd).then(() => {
+  void shell.ensureStarted(props.cwd, term.cols, term.rows).then(() => {
     refit()
     scheduleRefit()
   })
 }
 
 watch(
-  () => props.open,
-  (open) => {
-    if (!open) {
-      emit('focused-change', false)
-      return
-    }
-    startTerminal()
+  () => props.expanded,
+  (expanded) => {
     void nextTick(() => {
       refit()
-      focusTerminal()
+      if (expanded) focusTerminal()
     })
   },
   { flush: 'post' }
@@ -130,13 +127,11 @@ onMounted(() => {
   observer = new ResizeObserver(scheduleRefit)
   if (root.value) observer.observe(root.value)
 
-  if (props.open) {
-    startTerminal()
-    void nextTick(() => {
-      refit()
-      focusTerminal()
-    })
-  }
+  startTerminal()
+  void nextTick(() => {
+    refit()
+    focusTerminal()
+  })
 })
 
 onBeforeUnmount(() => {
@@ -156,17 +151,20 @@ function onFocusOut(event: FocusEvent): void {
   if (next && root.value?.contains(next)) return
   emit('focused-change', false)
 }
+
+defineExpose({ focusTerminal })
 </script>
 
 <template>
   <section
-    v-show="open"
     ref="root"
-    class="flex h-72 shrink-0 flex-col border-t border-border bg-bg"
+    class="flex shrink-0 flex-col overflow-hidden border-t border-border bg-bg"
+    :class="expanded ? 'h-72' : 'h-16'"
     @focusin="emit('focused-change', true)"
     @focusout="onFocusOut"
   >
     <div
+      v-if="expanded"
       class="flex h-8 shrink-0 items-center justify-between border-b border-border-subtle bg-surface px-3"
     >
       <span class="text-ui-sm font-medium tracking-wider text-fg-dim uppercase">
@@ -175,8 +173,8 @@ function onFocusOut(event: FocusEvent): void {
       <button
         type="button"
         class="rounded p-0.5 text-fg-dim transition-colors hover:bg-hover hover:text-fg"
-        title="Hide terminal (Ctrl+O)"
-        @click="emit('close')"
+        title="Collapse to the command line (Ctrl+O)"
+        @click="emit('collapse')"
       >
         <svg
           viewBox="0 0 24 24"
