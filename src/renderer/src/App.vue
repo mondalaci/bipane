@@ -30,6 +30,14 @@ function shellQuote(value: string): string {
   return "'" + value.replaceAll("'", "'\\''") + "'"
 }
 
+/**
+ * Panel -> shell cwd sync has to type a real `cd` into a real prompt, so the
+ * shell echoes it and the strip fills up with commands the user never issued.
+ * Appending a printf that walks back over the echoed line and clears it hides
+ * the sync, and `&&` means a failed `cd` still shows its error.
+ */
+const ERASE_ECHO = "printf '\\033[1A\\033[2K'"
+
 function setActive(side: PanelSide): void {
   activeSide.value = side
 }
@@ -108,7 +116,7 @@ function pushCwdToShell(): void {
   if (pendingTimer !== null) window.clearTimeout(pendingTimer)
   pendingTimer = window.setTimeout(clearPendingPush, 3000)
 
-  shell.write(`cd ${shellQuote(target)}\r`)
+  shell.write(`cd ${shellQuote(target)} && ${ERASE_ECHO}\r`)
 }
 
 watch([activePanePath, shellIdle, shellStarted, shellInput], pushCwdToShell)

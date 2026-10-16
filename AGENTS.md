@@ -96,10 +96,12 @@ its "go up" meaning once the line is empty.
   `useShell.inputLine` is fed from xterm's `onData`. It decides whether `Enter`
   runs the line or activates the panel entry, whether `Backspace` goes up, and
   it stops the cwd sync from injecting a `cd` into a half-typed command.
-- **Panel -> shell cwd sync is visible**: it types `cd '<path>'` at the prompt,
-  so the shell echoes it. Gating on an empty line keeps it from corrupting a
-  command, but the echo is shown. Suppressing it is not possible while sharing
-  one PTY, which is the trade-off for the strip being the real shell.
+- **Panel -> shell cwd sync types a real `cd` into a real prompt**, so the shell
+  echoes it and the strip fills with commands the user never issued. The
+  injected line carries a trailing `printf '\033[1A\033[2K'` that walks back
+  over the echo and clears it, so only the new prompt shows. `&&` keeps a failed
+  `cd` visible as an error. Gating on an empty input line is what stops the
+  injection from being appended to a half-typed command.
 - **The terminal is killed on unmount**, so a dev-mode HMR update of
   `TerminalPane.vue` kills the running shell and spawns a fresh one.
 - **Focus model:** the command line holds focus whenever the terminal does not,
