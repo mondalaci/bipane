@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { nextTick, ref, watch } from 'vue'
-import type { PaneController } from '@renderer/composables/useDirectory'
+import type { PaneController, PaneEntry } from '@renderer/composables/useDirectory'
 import { formatDate, formatSize } from '@renderer/lib/format'
-import type { DirEntry } from '@shared/types'
 
 const props = defineProps<{ controller: PaneController; active: boolean }>()
 
@@ -44,7 +43,8 @@ function rowClass(index: number): string {
   return props.active ? 'bg-selection text-fg-bright' : 'bg-selection-inactive text-fg'
 }
 
-function iconClass(entry: DirEntry): string {
+function iconClass(entry: PaneEntry): string {
+  if (entry.isParent) return 'text-fg-dim'
   if (entry.isSymlink) return 'text-accent-strong'
   if (entry.kind === 'directory') return 'text-folder'
   return 'text-fg-dim'
@@ -89,7 +89,7 @@ function metaClass(index: number): string {
         {{ controller.state.error }}
       </li>
       <li
-        v-else-if="controller.state.entries.length === 0"
+        v-else-if="controller.state.itemCount === 0"
         class="px-3 py-2 text-ui text-fg-dim"
       >
         Empty folder
@@ -105,7 +105,21 @@ function metaClass(index: number): string {
       >
         <span class="flex w-4 shrink-0 items-center justify-center" :class="iconClass(entry)">
           <svg
-            v-if="entry.kind === 'directory'"
+            v-if="entry.isParent"
+            viewBox="0 0 24 24"
+            class="h-3.5 w-3.5"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M12 19V5" />
+            <path d="m5 12 7-7 7 7" />
+          </svg>
+          <svg
+            v-else-if="entry.kind === 'directory'"
             viewBox="0 0 24 24"
             class="h-3.5 w-3.5"
             fill="currentColor"
@@ -143,7 +157,7 @@ function metaClass(index: number): string {
           {{ entry.kind === 'directory' ? '' : formatSize(entry.size) }}
         </span>
         <span class="w-28 shrink-0 text-right tabular-nums" :class="metaClass(index)">
-          {{ formatDate(entry.mtimeMs) }}
+          {{ entry.isParent ? '' : formatDate(entry.mtimeMs) }}
         </span>
       </li>
     </ul>
@@ -151,7 +165,7 @@ function metaClass(index: number): string {
     <div
       class="flex h-6 shrink-0 items-center justify-between border-t border-border-subtle bg-surface px-3 text-ui-sm text-fg-dim"
     >
-      <span class="tabular-nums">{{ controller.state.entries.length }} items</span>
+      <span class="tabular-nums">{{ controller.state.itemCount }} items</span>
       <span v-if="controller.state.parent" class="truncate font-mono" :title="controller.state.parent">
         {{ controller.state.parent }}
       </span>

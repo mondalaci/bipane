@@ -11,7 +11,7 @@ const props = defineProps<{
 }>()
 
 const entry = computed(() => props.pane.current())
-const itemCount = computed(() => props.pane.state.entries.length)
+const itemCount = computed(() => props.pane.state.itemCount)
 </script>
 
 <template>
@@ -26,7 +26,7 @@ const itemCount = computed(() => props.pane.state.entries.length)
     </div>
 
     <div class="flex shrink-0 items-center gap-3">
-      <template v-if="entry">
+      <template v-if="entry && !entry.isParent">
         <span class="hidden tabular-nums lg:inline">{{ formatMode(entry.mode) }}</span>
         <span class="tabular-nums">
           {{ entry.kind === 'directory' ? 'dir' : formatSize(entry.size) }}

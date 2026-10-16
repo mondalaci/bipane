@@ -1,11 +1,14 @@
 import { reactive } from 'vue'
-import type { DirEntry, PanelSide } from '@shared/types'
+import type { DirEntry, DirListing, PanelSide } from '@shared/types'
+
+export type PaneEntry = DirEntry & { isParent?: boolean }
 
 export interface PaneState {
   side: PanelSide
   path: string
   parent: string | null
-  entries: DirEntry[]
+  entries: PaneEntry[]
+  itemCount: number
   cursor: number
   loading: boolean
   error: string | null
@@ -19,8 +22,10 @@ export interface PaneController {
   moveCursor(delta: number): void
   moveTo(index: number): void
   activate(): Promise<void>
-  current(): DirEntry | undefined
+  current(): PaneEntry | undefined
 }
+
+const PARENT_LABEL = '..'
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
 
@@ -33,18 +38,38 @@ function sortEntries(entries: DirEntry[]): DirEntry[] {
   })
 }
 
+function toRows(listing: DirListing): PaneEntry[] {
+  const sorted = sortEntries(listing.entries)
+  if (!listing.parent) return sorted
+
+  const parentRow: PaneEntry = {
+    name: PARENT_LABEL,
+    path: listing.parent,
+    kind: 'directory',
+    isSymlink: false,
+    symlinkTarget: null,
+    size: 0,
+    mtimeMs: 0,
+    mode: 0,
+    isParent: true
+  }
+
+  return [parentRow, ...sorted]
+}
+
 export function useDirectory(side: PanelSide): PaneController {
   const state = reactive<PaneState>({
     side,
     path: '',
     parent: null,
     entries: [],
+    itemCount: 0,
     cursor: 0,
     loading: false,
     error: null
   })
 
-  function current(): DirEntry | undefined {
+  function current(): PaneEntry | undefined {
     return state.entries[state.cursor]
   }
 
@@ -71,7 +96,8 @@ export function useDirectory(side: PanelSide): PaneController {
 
     state.path = result.data.path
     state.parent = result.data.parent
-    state.entries = sortEntries(result.data.entries)
+    state.entries = toRows(result.data)
+    state.itemCount = result.data.entries.length
     state.cursor = 0
   }
 
