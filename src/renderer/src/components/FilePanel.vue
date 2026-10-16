@@ -56,20 +56,12 @@ function scrollRowIntoView(index: number, align: ScrollAlign): void {
 }
 
 watch(
-  () => props.controller.state.cursor,
-  async (index) => {
-    const align = props.controller.state.scrollAlign
+  [() => props.controller.state.path, () => props.controller.state.cursor],
+  async () => {
+    const { cursor, scrollAlign } = props.controller.state
     props.controller.state.scrollAlign = 'nearest'
     await nextTick()
-    scrollRowIntoView(index, align)
-  }
-)
-
-watch(
-  () => props.controller.state.path,
-  async () => {
-    await nextTick()
-    listEl.value?.scrollTo({ top: 0 })
+    scrollRowIntoView(cursor, scrollAlign)
   }
 )
 

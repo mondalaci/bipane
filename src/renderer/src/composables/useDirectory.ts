@@ -21,7 +21,7 @@ export interface PaneState {
 export interface PaneController {
   readonly state: PaneState
   init(): Promise<void>
-  navigateTo(dir: string): Promise<void>
+  navigateTo(dir: string, focusPath?: string): Promise<void>
   goUp(): Promise<void>
   moveCursor(delta: number): void
   movePage(direction: 1 | -1): void
@@ -86,7 +86,12 @@ export function useDirectory(side: PanelSide): PaneController {
     return Math.min(Math.max(value, 0), last)
   }
 
-  async function navigateTo(dir: string): Promise<void> {
+  function indexOfPath(rows: PaneEntry[], target: string): number {
+    const index = rows.findIndex((row) => row.path === target)
+    return index >= 0 ? index : 0
+  }
+
+  async function navigateTo(dir: string, focusPath?: string): Promise<void> {
     state.loading = true
     state.error = null
 
@@ -98,17 +103,19 @@ export function useDirectory(side: PanelSide): PaneController {
       return
     }
 
+    const rows = toRows(result.data)
     state.path = result.data.path
     state.parent = result.data.parent
-    state.entries = toRows(result.data)
+    state.entries = rows
     state.itemCount = result.data.entries.length
-    state.cursor = 0
+    state.cursor = focusPath ? indexOfPath(rows, focusPath) : 0
     state.scrollAlign = 'nearest'
   }
 
   async function goUp(): Promise<void> {
     if (!state.parent) return
-    await navigateTo(state.parent)
+    // Park the cursor on the directory we came from.
+    await navigateTo(state.parent, state.path)
   }
 
   function moveCursor(delta: number): void {
@@ -141,6 +148,11 @@ export function useDirectory(side: PanelSide): PaneController {
   async function activate(): Promise<void> {
     const entry = current()
     if (!entry) return
+
+    if (entry.isParent) {
+      await goUp()
+      return
+    }
 
     if (entry.kind === 'directory') {
       await navigateTo(entry.path)
