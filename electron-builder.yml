@@ -1,0 +1,18 @@
+appId: com.bipane.app
+productName: Bipane
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**
+  - package.json
+asarUnpack:
+  - node_modules/node-pty/**
+npmRebuild: true
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Utility
+  synopsis: Modern dual-pane file manager
+  description: A modern orthodox (dual-pane) file manager with a VSCode-inspired interface and an integrated terminal.
