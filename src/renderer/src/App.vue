@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import FilePanel from '@renderer/components/FilePanel.vue'
 import StatusBar from '@renderer/components/StatusBar.vue'
 import TerminalPane from '@renderer/components/TerminalPane.vue'
@@ -35,7 +35,22 @@ function closeTerminal(): void {
   blurToPanes()
 }
 
+function toggleSearch(): void {
+  const pane = activePane.value
+  if (pane.state.searchActive) pane.closeSearch()
+  else pane.openSearch()
+}
+
+// A filter belongs to the pane it was typed in.
+watch(activeSide, (side) => {
+  const inactive = side === 'left' ? right : left
+  inactive.closeSearch()
+})
+
 function handlePaneKey(event: KeyboardEvent): void {
+  const pane = activePane.value
+  const searching = pane.state.searchActive
+
   if (event.key === 'Tab') {
     event.preventDefault()
     setActive(activeSide.value === 'left' ? 'right' : 'left')
@@ -44,12 +59,23 @@ function handlePaneKey(event: KeyboardEvent): void {
 
   if (event.ctrlKey || event.altKey || event.metaKey) return
 
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    if (searching) {
+      pane.closeSearch()
+      return
+    }
+    if (terminalOpen.value) closeTerminal()
+    return
+  }
+
+  // While searching, Backspace/Delete edit the query instead of the pane.
+  if (searching && (event.key === 'Backspace' || event.key === 'Delete')) return
+
   if (event.repeat && (event.key === 'Enter' || event.key === 'Backspace')) {
     event.preventDefault()
     return
   }
-
-  const pane = activePane.value
 
   switch (event.key) {
     case 'ArrowDown':
@@ -84,15 +110,26 @@ function handlePaneKey(event: KeyboardEvent): void {
       event.preventDefault()
       void pane.goUp()
       break
-    case 'Escape':
-      if (terminalOpen.value) closeTerminal()
-      break
     default:
       break
   }
 }
 
 function onKeydown(event: KeyboardEvent): void {
+  const isSearchToggle =
+    event.altKey &&
+    !event.ctrlKey &&
+    !event.metaKey &&
+    !event.shiftKey &&
+    event.code === 'KeyS'
+
+  if (isSearchToggle) {
+    event.preventDefault()
+    event.stopPropagation()
+    toggleSearch()
+    return
+  }
+
   const isTerminalToggle =
     event.ctrlKey &&
     !event.shiftKey &&

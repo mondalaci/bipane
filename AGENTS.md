@@ -36,7 +36,8 @@ src/renderer/src/lib/format.ts               size/date/permission formatting
 ```
 
 Keys: `Tab` switches panes, arrows/`Home`/`End`/`PgUp`/`PgDn` move the cursor,
-`Enter` descends or opens, `Backspace` goes up, `Ctrl+O` toggles the terminal.
+`Enter` descends or opens, `Backspace` goes up, `Ctrl+O` toggles the terminal,
+`Alt+S` starts an incremental search.
 
 ## Gotchas
 
@@ -63,6 +64,14 @@ Keys: `Tab` switches panes, arrows/`Home`/`End`/`PgUp`/`PgDn` move the cursor,
   control silently swallows clicks. Both are `@utility` rules in `main.css`.
   Window controls go through `window.bipane.win`; main broadcasts
   `window:maximized-change` so the maximize/restore icon stays in sync.
+- **Incremental search holds DOM focus in its input**, so `handlePaneKey` in
+  `App.vue` intentionally lets editing keys through (printable characters,
+  Backspace/Delete) and intercepts only navigation keys. Anything added to that
+  switch also changes search-mode behaviour — decide deliberately whether the
+  search box or the pane should consume it.
+- **The pane's row list must contain only entries.** A status message rendered
+  as a sibling `<li>` shifts every index, which silently breaks cursor scrolling
+  and page jumps; `FilePanel` renders that notice as a sibling of the `<ul>`.
 - **Tailwind v4 is configured CSS-first** (`@theme` in
   `src/renderer/src/styles/main.css`). There is no `tailwind.config.js`.
   Theme tokens are the design system — prefer `bg-surface`, `text-fg-dim`,

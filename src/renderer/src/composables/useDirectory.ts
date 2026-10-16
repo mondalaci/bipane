@@ -9,11 +9,14 @@ export interface PaneState {
   side: PanelSide
   path: string
   parent: string | null
+  allRows: PaneEntry[]
   entries: PaneEntry[]
   itemCount: number
   cursor: number
   pageRows: number
   scrollAlign: ScrollAlign
+  searchActive: boolean
+  searchQuery: string
   loading: boolean
   error: string | null
 }
@@ -28,6 +31,9 @@ export interface PaneController {
   moveTo(index: number): void
   activate(): Promise<void>
   current(): PaneEntry | undefined
+  openSearch(): void
+  updateSearch(query: string): void
+  closeSearch(): void
 }
 
 const PARENT_LABEL = '..'
@@ -62,16 +68,28 @@ function toRows(listing: DirListing): PaneEntry[] {
   return [parentRow, ...sorted]
 }
 
+function countRealRows(rows: PaneEntry[]): number {
+  return rows.reduce((count, row) => (row.isParent ? count : count + 1), 0)
+}
+
+function firstMatchIndex(rows: PaneEntry[]): number {
+  const index = rows.findIndex((row) => !row.isParent)
+  return index >= 0 ? index : 0
+}
+
 export function useDirectory(side: PanelSide): PaneController {
   const state = reactive<PaneState>({
     side,
     path: '',
     parent: null,
+    allRows: [],
     entries: [],
     itemCount: 0,
     cursor: 0,
     pageRows: 10,
     scrollAlign: 'nearest',
+    searchActive: false,
+    searchQuery: '',
     loading: false,
     error: null
   })
@@ -86,9 +104,48 @@ export function useDirectory(side: PanelSide): PaneController {
     return Math.min(Math.max(value, 0), last)
   }
 
-  function indexOfPath(rows: PaneEntry[], target: string): number {
-    const index = rows.findIndex((row) => row.path === target)
-    return index >= 0 ? index : 0
+  function applyFilter(): void {
+    const previous = current()
+    const needle = state.searchQuery.trim().toLowerCase()
+
+    state.entries = needle
+      ? state.allRows.filter(
+          (row) => row.isParent || row.name.toLowerCase().includes(needle)
+        )
+      : state.allRows
+
+    state.itemCount = countRealRows(state.entries)
+
+    // With an active query, only a real entry is worth keeping the cursor on:
+    // the ".." row survives every filter, so holding it would strand the
+    // cursor there instead of landing on the match.
+    let preserved = -1
+    if (previous && (needle === '' || !previous.isParent)) {
+      preserved = state.entries.findIndex((row) => row.path === previous.path)
+    }
+
+    state.cursor = preserved >= 0 ? preserved : firstMatchIndex(state.entries)
+    state.scrollAlign = 'nearest'
+  }
+
+  function openSearch(): void {
+    if (state.searchActive) return
+    state.searchActive = true
+    state.searchQuery = ''
+    applyFilter()
+  }
+
+  function updateSearch(query: string): void {
+    if (!state.searchActive) return
+    state.searchQuery = query
+    applyFilter()
+  }
+
+  function closeSearch(): void {
+    if (!state.searchActive) return
+    state.searchActive = false
+    state.searchQuery = ''
+    applyFilter()
   }
 
   async function navigateTo(dir: string, focusPath?: string): Promise<void> {
@@ -106,10 +163,20 @@ export function useDirectory(side: PanelSide): PaneController {
     const rows = toRows(result.data)
     state.path = result.data.path
     state.parent = result.data.parent
+    state.allRows = rows
     state.entries = rows
     state.itemCount = result.data.entries.length
     state.cursor = focusPath ? indexOfPath(rows, focusPath) : 0
     state.scrollAlign = 'nearest'
+
+    // A filter belongs to the directory it was typed in.
+    state.searchActive = false
+    state.searchQuery = ''
+  }
+
+  function indexOfPath(rows: PaneEntry[], target: string): number {
+    const index = rows.findIndex((row) => row.path === target)
+    return index >= 0 ? index : 0
   }
 
   async function goUp(): Promise<void> {
@@ -149,6 +216,10 @@ export function useDirectory(side: PanelSide): PaneController {
     const entry = current()
     if (!entry) return
 
+    // Resolve the target before dropping the filter: closeSearch keeps the
+    // cursor on this entry, but activation must act on what was highlighted.
+    if (state.searchActive) closeSearch()
+
     if (entry.isParent) {
       await goUp()
       return
@@ -177,6 +248,9 @@ export function useDirectory(side: PanelSide): PaneController {
     movePage,
     moveTo,
     activate,
-    current
+    current,
+    openSearch,
+    updateSearch,
+    closeSearch
   }
 }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type {
   PaneController,
   PaneEntry,
@@ -17,6 +17,19 @@ const emit = defineEmits<{
 }>()
 
 const listEl = ref<HTMLUListElement | null>(null)
+const searchInput = ref<HTMLInputElement | null>(null)
+
+// Kept out of the <ul> on purpose: the row list must contain exactly the
+// entries, or index-based scrolling and the cursor watch would be off by one.
+const notice = computed(() => {
+  const state = props.controller.state
+  if (state.error) return { text: state.error, error: true }
+  if (state.itemCount > 0) return null
+  return {
+    text: state.searchQuery ? `No matches for "${state.searchQuery}"` : 'Empty folder',
+    error: false
+  }
+})
 
 let listObserver: ResizeObserver | null = null
 
@@ -65,6 +78,16 @@ watch(
   }
 )
 
+watch(
+  () => props.controller.state.searchActive,
+  async (active) => {
+    await nextTick()
+    if (!active) return
+    searchInput.value?.focus()
+    searchInput.value?.select()
+  }
+)
+
 onMounted(() => {
   listObserver = new ResizeObserver(measurePageRows)
   if (listEl.value) listObserver.observe(listEl.value)
@@ -76,9 +99,18 @@ onBeforeUnmount(() => {
   listObserver = null
 })
 
-function onPointerDown(): void {
-  emit('pointer-down')
+function onSearchInput(event: Event): void {
+  const target = event.target
+  if (target instanceof HTMLInputElement) props.controller.updateSearch(target.value)
+}
+
+function onPointerDown(event: MouseEvent): void {
   emit('select')
+
+  const target = event.target
+  if (target instanceof HTMLElement && target.closest('[data-search]')) return
+
+  emit('pointer-down')
 }
 
 function onRowClick(index: number): void {
@@ -131,17 +163,50 @@ function metaClass(index: number): string {
       <span class="w-28 shrink-0 text-right">Modified</span>
     </div>
 
-    <ul ref="listEl" class="min-h-0 flex-1 overflow-y-auto">
-      <li v-if="controller.state.error" class="px-3 py-2 text-ui text-danger">
-        {{ controller.state.error }}
-      </li>
-      <li
-        v-else-if="controller.state.itemCount === 0"
-        class="px-3 py-2 text-ui text-fg-dim"
+    <div
+      v-if="controller.state.searchActive"
+      data-search
+      class="flex h-7 shrink-0 items-center gap-2 border-b border-border-subtle bg-bg-alt px-3"
+    >
+      <svg
+        viewBox="0 0 24 24"
+        class="h-3.5 w-3.5 shrink-0 text-fg-dim"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        aria-hidden="true"
       >
-        Empty folder
-      </li>
+        <circle cx="11" cy="11" r="7" />
+        <path d="m20 20-3.6-3.6" />
+      </svg>
+      <input
+        ref="searchInput"
+        type="text"
+        class="min-w-0 flex-1 bg-transparent font-mono text-ui text-fg outline-none placeholder:text-fg-dim"
+        placeholder="incremental search"
+        spellcheck="false"
+        autocomplete="off"
+        :value="controller.state.searchQuery"
+        @input="onSearchInput"
+      />
+      <span
+        v-if="controller.state.searchQuery"
+        class="shrink-0 tabular-nums text-ui-sm text-fg-dim"
+      >
+        {{ controller.state.itemCount }} matches
+      </span>
+    </div>
 
+    <p
+      v-if="notice"
+      class="shrink-0 px-3 py-2 text-ui"
+      :class="notice.error ? 'text-danger' : 'text-fg-dim'"
+    >
+      {{ notice.text }}
+    </p>
+
+    <ul ref="listEl" class="min-h-0 flex-1 overflow-y-auto">
       <li
         v-for="(entry, index) in controller.state.entries"
         :key="entry.path"

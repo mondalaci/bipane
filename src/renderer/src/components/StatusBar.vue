@@ -43,6 +43,8 @@ const itemCount = computed(() => props.pane.state.itemCount)
         <span>open</span>
         <kbd class="rounded border border-border bg-bg-alt px-1 font-mono text-2xs">⌫</kbd>
         <span>up</span>
+        <kbd class="rounded border border-border bg-bg-alt px-1 font-mono text-2xs">Alt+S</kbd>
+        <span>find</span>
         <kbd class="rounded border border-border bg-bg-alt px-1 font-mono text-2xs">Ctrl+O</kbd>
         <span>terminal</span>
       </span>
