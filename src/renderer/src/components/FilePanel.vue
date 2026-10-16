@@ -1,7 +1,13 @@
 <script setup lang="ts">
-import { nextTick, ref, watch } from 'vue'
-import type { PaneController, PaneEntry } from '@renderer/composables/useDirectory'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import type {
+  PaneController,
+  PaneEntry,
+  ScrollAlign
+} from '@renderer/composables/useDirectory'
 import { formatDate, formatSize } from '@renderer/lib/format'
+
+const ROW_HEIGHT = 22
 
 const props = defineProps<{ controller: PaneController; active: boolean }>()
 
@@ -12,12 +18,50 @@ const emit = defineEmits<{
 
 const listEl = ref<HTMLUListElement | null>(null)
 
+let listObserver: ResizeObserver | null = null
+
+function measurePageRows(): void {
+  const element = listEl.value
+  if (!element) return
+  const styles = getComputedStyle(element)
+  const padding = parseFloat(styles.paddingTop) + parseFloat(styles.paddingBottom)
+  const usable = element.clientHeight - padding
+  props.controller.state.pageRows = Math.max(1, Math.floor(usable / ROW_HEIGHT))
+}
+
+function scrollRowIntoView(index: number, align: ScrollAlign): void {
+  const element = listEl.value
+  if (!element) return
+
+  const rowTop = index * ROW_HEIGHT
+  const rowBottom = rowTop + ROW_HEIGHT
+  const viewTop = element.scrollTop
+  const viewBottom = viewTop + element.clientHeight
+
+  if (align === 'start') {
+    element.scrollTop = rowTop
+    return
+  }
+
+  if (align === 'end') {
+    element.scrollTop = Math.max(rowBottom - element.clientHeight, 0)
+    return
+  }
+
+  if (rowTop < viewTop) {
+    element.scrollTop = rowTop
+  } else if (rowBottom > viewBottom) {
+    element.scrollTop = rowBottom - element.clientHeight
+  }
+}
+
 watch(
   () => props.controller.state.cursor,
   async (index) => {
+    const align = props.controller.state.scrollAlign
+    props.controller.state.scrollAlign = 'nearest'
     await nextTick()
-    const row = listEl.value?.children[index]
-    if (row instanceof HTMLElement) row.scrollIntoView({ block: 'nearest' })
+    scrollRowIntoView(index, align)
   }
 )
 
@@ -28,6 +72,17 @@ watch(
     listEl.value?.scrollTo({ top: 0 })
   }
 )
+
+onMounted(() => {
+  listObserver = new ResizeObserver(measurePageRows)
+  if (listEl.value) listObserver.observe(listEl.value)
+  measurePageRows()
+})
+
+onBeforeUnmount(() => {
+  listObserver?.disconnect()
+  listObserver = null
+})
 
 function onPointerDown(): void {
   emit('pointer-down')
@@ -84,7 +139,7 @@ function metaClass(index: number): string {
       <span class="w-28 shrink-0 text-right">Modified</span>
     </div>
 
-    <ul ref="listEl" class="min-h-0 flex-1 overflow-y-auto py-1">
+    <ul ref="listEl" class="min-h-0 flex-1 overflow-y-auto">
       <li v-if="controller.state.error" class="px-3 py-2 text-ui text-danger">
         {{ controller.state.error }}
       </li>
@@ -98,7 +153,8 @@ function metaClass(index: number): string {
       <li
         v-for="(entry, index) in controller.state.entries"
         :key="entry.path"
-        class="flex h-[22px] cursor-default items-center gap-2 px-3 text-ui"
+        class="flex cursor-default items-center gap-2 px-3 text-ui"
+        :style="{ height: `${ROW_HEIGHT}px` }"
         :class="rowClass(index)"
         @click="onRowClick(index)"
         @dblclick="controller.activate()"

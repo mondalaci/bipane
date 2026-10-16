@@ -3,6 +3,8 @@ import type { DirEntry, DirListing, PanelSide } from '@shared/types'
 
 export type PaneEntry = DirEntry & { isParent?: boolean }
 
+export type ScrollAlign = 'nearest' | 'start' | 'end'
+
 export interface PaneState {
   side: PanelSide
   path: string
@@ -10,6 +12,8 @@ export interface PaneState {
   entries: PaneEntry[]
   itemCount: number
   cursor: number
+  pageRows: number
+  scrollAlign: ScrollAlign
   loading: boolean
   error: string | null
 }
@@ -20,6 +24,7 @@ export interface PaneController {
   navigateTo(dir: string): Promise<void>
   goUp(): Promise<void>
   moveCursor(delta: number): void
+  movePage(direction: 1 | -1): void
   moveTo(index: number): void
   activate(): Promise<void>
   current(): PaneEntry | undefined
@@ -65,6 +70,8 @@ export function useDirectory(side: PanelSide): PaneController {
     entries: [],
     itemCount: 0,
     cursor: 0,
+    pageRows: 10,
+    scrollAlign: 'nearest',
     loading: false,
     error: null
   })
@@ -73,13 +80,10 @@ export function useDirectory(side: PanelSide): PaneController {
     return state.entries[state.cursor]
   }
 
-  function clampCursor(): void {
+  function clampCursorTo(value: number): number {
     const last = state.entries.length - 1
-    if (last < 0) {
-      state.cursor = 0
-      return
-    }
-    state.cursor = Math.min(Math.max(state.cursor, 0), last)
+    if (last < 0) return 0
+    return Math.min(Math.max(value, 0), last)
   }
 
   async function navigateTo(dir: string): Promise<void> {
@@ -99,6 +103,7 @@ export function useDirectory(side: PanelSide): PaneController {
     state.entries = toRows(result.data)
     state.itemCount = result.data.entries.length
     state.cursor = 0
+    state.scrollAlign = 'nearest'
   }
 
   async function goUp(): Promise<void> {
@@ -107,13 +112,30 @@ export function useDirectory(side: PanelSide): PaneController {
   }
 
   function moveCursor(delta: number): void {
-    state.cursor += delta
-    clampCursor()
+    state.scrollAlign = 'nearest'
+    state.cursor = clampCursorTo(state.cursor + delta)
+  }
+
+  function movePage(direction: 1 | -1): void {
+    const last = state.entries.length - 1
+    if (last < 0) return
+
+    const target = state.cursor + direction * Math.max(state.pageRows, 1)
+    const clamped = clampCursorTo(target)
+
+    state.cursor = clamped
+
+    if (clamped !== target) {
+      // Ran past an end: show the final page rather than leaving it off-screen.
+      state.scrollAlign = direction > 0 ? 'end' : 'start'
+    } else {
+      state.scrollAlign = direction > 0 ? 'start' : 'end'
+    }
   }
 
   function moveTo(index: number): void {
-    state.cursor = index
-    clampCursor()
+    state.scrollAlign = 'nearest'
+    state.cursor = clampCursorTo(index)
   }
 
   async function activate(): Promise<void> {
@@ -134,5 +156,15 @@ export function useDirectory(side: PanelSide): PaneController {
     await navigateTo(home)
   }
 
-  return { state, init, navigateTo, goUp, moveCursor, moveTo, activate, current }
+  return {
+    state,
+    init,
+    navigateTo,
+    goUp,
+    moveCursor,
+    movePage,
+    moveTo,
+    activate,
+    current
+  }
 }

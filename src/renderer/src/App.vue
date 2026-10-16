@@ -62,11 +62,11 @@ function handlePaneKey(event: KeyboardEvent): void {
       break
     case 'PageDown':
       event.preventDefault()
-      pane.moveCursor(15)
+      pane.movePage(1)
       break
     case 'PageUp':
       event.preventDefault()
-      pane.moveCursor(-15)
+      pane.movePage(-1)
       break
     case 'Home':
       event.preventDefault()
