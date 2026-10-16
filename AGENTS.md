@@ -110,7 +110,8 @@ its "go up" meaning once the line is empty.
 - **Tailwind v4 is configured CSS-first** (`@theme` in
   `src/renderer/src/styles/main.css`). There is no `tailwind.config.js`.
   Theme tokens are the design system — prefer `bg-surface`, `text-fg-dim`,
-  `border-border` over raw hex values.
+  `border-border` over raw hex values. The terminal resolves its font from the
+  `--font-mono` token at runtime, so the mono font is defined in one place.
 - The renderer has a CSP in `src/renderer/index.html`. Dev-only allowances
   (`ws://localhost:*`, `'unsafe-inline'` styles) are required for Vite HMR.
 

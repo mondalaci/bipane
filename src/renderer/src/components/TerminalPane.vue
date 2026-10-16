@@ -4,7 +4,15 @@ import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
 import { useShell } from '@renderer/composables/useShell'
 
-const MONO_FONT = "'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, Consolas, monospace"
+// Read the mono stack from the theme rather than repeating it, so the terminal
+// and the rest of the UI cannot drift apart (or fall out of sync when the theme
+// token changes).
+function monoFontStack(): string {
+  const value = getComputedStyle(document.documentElement)
+    .getPropertyValue('--font-mono')
+    .trim()
+  return value || 'monospace'
+}
 
 const props = defineProps<{ expanded: boolean; cwd: string }>()
 
@@ -49,7 +57,7 @@ function startTerminal(): void {
   term = new Terminal({
     cursorBlink: true,
     cursorStyle: 'block',
-    fontFamily: MONO_FONT,
+    fontFamily: monoFontStack(),
     fontSize: 12,
     lineHeight: 1.25,
     scrollback: 5000,
