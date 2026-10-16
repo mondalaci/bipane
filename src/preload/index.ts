@@ -32,6 +32,17 @@ const api: BipaneApi = {
       ipcRenderer.on('pty:exit', listener)
       return () => ipcRenderer.off('pty:exit', listener)
     }
+  },
+  win: {
+    minimize: () => ipcRenderer.invoke('window:minimize'),
+    toggleMaximize: () => ipcRenderer.invoke('window:toggle-maximize'),
+    close: () => ipcRenderer.invoke('window:close'),
+    isMaximized: () => ipcRenderer.invoke('window:is-maximized'),
+    onMaximizedChange: (handler: (maximized: boolean) => void) => {
+      const listener = (_event: IpcRendererEvent, maximized: boolean) => handler(maximized)
+      ipcRenderer.on('window:maximized-change', listener)
+      return () => ipcRenderer.off('window:maximized-change', listener)
+    }
   }
 }
 

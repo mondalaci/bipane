@@ -22,7 +22,16 @@ export interface BipanePtyApi {
   onExit(handler: (event: PtyExitEvent) => void): () => void
 }
 
+export interface BipaneWindowApi {
+  minimize(): Promise<void>
+  toggleMaximize(): Promise<boolean>
+  close(): Promise<void>
+  isMaximized(): Promise<boolean>
+  onMaximizedChange(handler: (maximized: boolean) => void): () => void
+}
+
 export interface BipaneApi {
   fs: BipaneFsApi
   pty: BipanePtyApi
+  win: BipaneWindowApi
 }

@@ -23,10 +23,12 @@ There is no linter or test runner configured yet.
 src/main/index.ts        window lifecycle, single-instance lock
 src/main/ipc/fs.ts       IPC: fs:home, fs:list, fs:open, fs:reveal
 src/main/ipc/pty.ts      IPC: pty:create/write/resize/kill, pushes pty:data, pty:exit
+src/main/ipc/window.ts   IPC: window:minimize/toggle-maximize/close/is-maximized
 src/preload/index.ts     contextBridge -> window.bipane (implements BipaneApi)
 src/shared/types.ts      DirEntry/DirListing/Result/Pty* types (main + renderer)
 src/shared/api.ts        BipaneApi interface (the preload contract)
 src/renderer/src/App.vue global keyboard model, layout, terminal toggle
+src/renderer/src/components/TitleBar.vue     frameless title bar + window controls
 src/renderer/src/components/FilePanel.vue    one pane: path bar, list, footer
 src/renderer/src/components/TerminalPane.vue xterm instance bound to one pty
 src/renderer/src/composables/useDirectory.ts per-pane navigation state + actions
@@ -54,6 +56,13 @@ Keys: `Tab` switches panes, arrows/`Home`/`End`/`PgUp`/`PgDn` move the cursor,
   launching Electron directly, otherwise it runs as plain Node and reports the
   bundled Node version instead of the Electron version:
   `env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron .`
+- **The window is frameless** (`frame: false`), so the OS decoration is replaced
+  by `TitleBar.vue` (a single 32px row that also holds the terminal toggle).
+  Moving the window depends on `-webkit-app-region`: the header is
+  `drag-region` and interactive children must be `no-drag`, otherwise a new
+  control silently swallows clicks. Both are `@utility` rules in `main.css`.
+  Window controls go through `window.bipane.win`; main broadcasts
+  `window:maximized-change` so the maximize/restore icon stays in sync.
 - **Tailwind v4 is configured CSS-first** (`@theme` in
   `src/renderer/src/styles/main.css`). There is no `tailwind.config.js`.
   Theme tokens are the design system — prefer `bg-surface`, `text-fg-dim`,

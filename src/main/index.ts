@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { app, BrowserWindow } from 'electron'
 import { registerFsHandlers } from './ipc/fs'
 import { killAllSessions, registerPtyHandlers } from './ipc/pty'
+import { registerWindowHandlers } from './ipc/window'
 
 const APP_BACKGROUND = '#1e1e1e'
 
@@ -22,7 +23,7 @@ function createWindow(): BrowserWindow {
     show: false,
     title: 'Bipane',
     backgroundColor: APP_BACKGROUND,
-    autoHideMenuBar: true,
+    frame: false,
     webPreferences: {
       preload: resolvePreload(),
       contextIsolation: true,
@@ -33,6 +34,13 @@ function createWindow(): BrowserWindow {
   })
 
   window.once('ready-to-show', () => window.show())
+
+  const notifyMaximized = (maximized: boolean) => {
+    if (window.webContents.isDestroyed()) return
+    window.webContents.send('window:maximized-change', maximized)
+  }
+  window.on('maximize', () => notifyMaximized(true))
+  window.on('unmaximize', () => notifyMaximized(false))
 
   const devUrl = process.env['ELECTRON_RENDERER_URL']
   if (devUrl) {
@@ -46,6 +54,7 @@ function createWindow(): BrowserWindow {
 
 registerFsHandlers()
 registerPtyHandlers()
+registerWindowHandlers()
 
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {

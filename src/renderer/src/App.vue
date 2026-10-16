@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import FilePanel from '@renderer/components/FilePanel.vue'
-import HeaderBar from '@renderer/components/HeaderBar.vue'
 import StatusBar from '@renderer/components/StatusBar.vue'
 import TerminalPane from '@renderer/components/TerminalPane.vue'
+import TitleBar from '@renderer/components/TitleBar.vue'
 import { useDirectory } from '@renderer/composables/useDirectory'
 import type { PanelSide } from '@shared/types'
 
@@ -125,7 +125,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="flex h-full flex-col overflow-hidden bg-bg text-fg select-none">
-    <HeaderBar :terminal-open="terminalOpen" @toggle-terminal="toggleTerminal" />
+    <TitleBar :terminal-open="terminalOpen" @toggle-terminal="toggleTerminal" />
 
     <main class="flex min-h-0 flex-1">
       <FilePanel
