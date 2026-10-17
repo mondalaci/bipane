@@ -153,7 +153,7 @@ function endPainting(): void {
 function rowClass(index: number): string {
   const base =
     index !== props.controller.state.cursor
-      ? 'text-fg hover:bg-hover'
+      ? 'text-fg'
       : props.active
         ? 'bg-selection text-fg-bright'
         : 'bg-selection-inactive text-fg'
