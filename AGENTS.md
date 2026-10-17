@@ -109,8 +109,12 @@ it edits the line, and reaching the parent is the `..` row's job.
   over the echo and clears it, so only the new prompt shows. `&&` keeps a failed
   `cd` visible as an error. Gating on an empty input line is what stops the
   injection from being appended to a half-typed command.
-- **The terminal is killed on unmount**, so a dev-mode HMR update of
-  `TerminalPane.vue` kills the running shell and spawns a fresh one.
+- **The shell is app-level; the terminal view does not own it.** `TerminalPane`
+  must not kill it on unmount — main reaps sessions when the window goes away.
+  Killing it there let any remount (a Vue HMR update, a reload) race a fresh
+  spawn and take the *new* shell down with it, since the session id is a
+  constant. For the same reason `attachTerminal` does not drain the output
+  buffer: a view that attaches later replays the session so far.
 - **Focus model:** the command line holds focus whenever the terminal does not,
   so `focusPanes()` *focuses the command line* rather than blurring. The search
   box and the terminal are the other two focus targets. Navigation keys are

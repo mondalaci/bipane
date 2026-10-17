@@ -155,8 +155,10 @@ export function attachTerminal(
   onData: (data: string) => void,
   onExit: (code: number) => void
 ): { initial: string; detach: () => void } {
+  // The buffer is not drained: a terminal that attaches later — or re-attaches
+  // after a reload — replays the session so far instead of showing a blank
+  // screen. It is a bounded rolling window, not the full scrollback.
   const initial = buffer
-  buffer = ''
   dataListeners.add(onData)
   exitListeners.add(onExit)
 
@@ -167,11 +169,6 @@ export function attachTerminal(
       exitListeners.delete(onExit)
     }
   }
-}
-
-export function kill(): void {
-  teardown()
-  window.bipane.pty.kill(SESSION_ID)
 }
 
 export function useShell() {
@@ -186,7 +183,6 @@ export function useShell() {
     clearInputLine,
     noteInput,
     resize,
-    attachTerminal,
-    kill
+    attachTerminal
   }
 }

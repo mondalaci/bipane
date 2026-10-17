@@ -206,11 +206,9 @@ function handlePaneKey(event: KeyboardEvent): void {
       pane.moveTo(pane.state.entries.length - 1)
       break
     case 'Enter':
-      if (hasInput) {
-        // Fall through to the shell, but give the output room to be seen.
-        if (!terminalExpanded.value) terminalExpanded.value = true
-        return
-      }
+      // With a line typed, fall through to the shell and leave the terminal
+      // exactly as the user left it.
+      if (hasInput) return
       consume(event)
       void pane.activate()
       break

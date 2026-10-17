@@ -148,7 +148,9 @@ onBeforeUnmount(() => {
   observer = null
   detach?.()
   detach = null
-  shell.kill()
+  // The shell is app-level, not owned by this view: main kills sessions when
+  // the window goes away. Killing it here would let any remount race a fresh
+  // spawn and take the new shell down with it.
   term?.dispose()
   term = null
   fitAddon = null
