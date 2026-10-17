@@ -3,6 +3,8 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import { ipcMain, shell } from 'electron'
 import type {
+  CopyFailure,
+  CopyOutcome,
   DeleteFailure,
   DeleteOutcome,
   DirEntry,
@@ -134,6 +136,88 @@ export function registerFsHandlers(): void {
       } catch (error) {
         return { ok: false, error: toFsError(error) }
       }
+    }
+  )
+
+  ipcMain.handle(
+    'fs:copy',
+    async (
+      _event,
+      sources: string[],
+      destination: string,
+      baseDir: string
+    ): Promise<Result<CopyOutcome>> => {
+      if (typeof destination !== 'string' || destination.length === 0) {
+        return { ok: false, error: { code: 'EINVAL', message: 'No destination directory' } }
+      }
+      if (!Array.isArray(sources)) {
+        return { ok: false, error: { code: 'EINVAL', message: 'Invalid copy arguments' } }
+      }
+
+      // A relative destination belongs to the pane being copied from, not to
+      // the process working directory — typing `sub` must mean `<pane>/sub`.
+      const base =
+        typeof baseDir === 'string' && baseDir.length > 0 ? path.resolve(baseDir) : process.cwd()
+      const destDir = path.isAbsolute(destination)
+        ? path.resolve(destination)
+        : path.resolve(base, destination)
+
+      // The field may name a folder that does not exist yet (typically a
+      // relative name under the source pane). Create it, so typing `sub` copies
+      // into a `sub` folder rather than failing on a missing parent.
+      try {
+        await fs.mkdir(destDir, { recursive: true })
+      } catch (error) {
+        return { ok: false, error: toFsError(error) }
+      }
+
+      const copied: string[] = []
+      const failed: CopyFailure[] = []
+
+      for (const source of sources) {
+        if (typeof source !== 'string' || source.length === 0) continue
+
+        const from = path.resolve(source)
+        const to = path.join(destDir, path.basename(from))
+
+        try {
+          // Never silently clobber: a name that already exists in the
+          // destination is reported as a per-entry failure, exactly like
+          // rename, so a copy can never overwrite data.
+          try {
+            await fs.lstat(to)
+            failed.push({
+              path: from,
+              error: {
+                code: 'EEXIST',
+                message: `"${path.basename(to)}" already exists in "${destDir}"`
+              }
+            })
+            continue
+          } catch {
+            // Destination is free — proceed.
+          }
+
+          // A directory cannot be copied into itself or into one of its own
+          // descendants: that would recurse without end.
+          if (to.startsWith(from + path.sep)) {
+            failed.push({
+              path: from,
+              error: { code: 'EINVAL', message: 'Cannot copy a directory into itself' }
+            })
+            continue
+          }
+
+          // `recursive` covers directories; symlinks are preserved rather than
+          // followed, so a link is copied as a link.
+          await fs.cp(from, to, { recursive: true, errorOnExist: true, force: false })
+          copied.push(to)
+        } catch (error) {
+          failed.push({ path: from, error: toFsError(error) })
+        }
+      }
+
+      return { ok: true, data: { copied, failed, destination: destDir } }
     }
   )
 

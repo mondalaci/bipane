@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import FilePanel from '@renderer/components/FilePanel.vue'
+import ConfirmCopy from '@renderer/components/ConfirmCopy.vue'
 import ConfirmDelete from '@renderer/components/ConfirmDelete.vue'
 import StatusBar from '@renderer/components/StatusBar.vue'
 import TerminalPane from '@renderer/components/TerminalPane.vue'
@@ -31,7 +32,16 @@ const terminalRef = ref<InstanceType<typeof TerminalPane> | null>(null)
  */
 const deleteTargets = ref<PaneEntry[]>([])
 
+/**
+ * F5 stages the active pane's targets and the other pane's directory here. Like
+ * the delete dialog, a non-null value is what "the copy dialog is open" means.
+ * The destination is only the field's initial value: the dialog can edit it,
+ * and whatever it emits on confirm is what is copied.
+ */
+const copyJob = ref<{ entries: PaneEntry[]; destination: string } | null>(null)
+
 const activePane = computed(() => (activeSide.value === 'left' ? left : right))
+const inactivePane = computed(() => (activeSide.value === 'left' ? right : left))
 const activePanePath = computed(() => activePane.value.state.path)
 
 function shellQuote(value: string): string {
@@ -98,6 +108,35 @@ async function confirmDelete(): Promise<void> {
   const pane = activePane.value
   deleteTargets.value = []
   await pane.deleteEntries()
+  focusPanes()
+}
+
+/**
+ * F5 copies into the other pane, so the source is the active pane and the
+ * destination is the inactive one. Capture both now: the dialog is modal, but
+ * the panes can still refresh under it.
+ */
+function requestCopy(): void {
+  const targets = activePane.value.selectionTargets()
+  const destination = inactivePane.value.state.path
+  if (targets.length === 0 || !destination) return
+  copyJob.value = { entries: targets, destination }
+}
+
+function cancelCopy(): void {
+  copyJob.value = null
+  focusPanes()
+}
+
+async function confirmCopy(destination: string): Promise<void> {
+  const source = activePane.value
+  const target = inactivePane.value
+  copyJob.value = null
+
+  // The handler resolves a relative destination against the source pane, so the
+  // resolved directory is what a pane showing it must be compared against.
+  const resolved = await source.copyEntries(destination)
+  if (resolved && target.state.path === resolved) await target.refresh()
   focusPanes()
 }
 
@@ -292,6 +331,10 @@ function handlePaneKey(event: KeyboardEvent): void {
       consume(event)
       pane.toggleSelection()
       break
+    case 'F5':
+      consume(event)
+      requestCopy()
+      break
     case 'F8':
       consume(event)
       requestDelete()
@@ -314,13 +357,14 @@ function handlePaneKey(event: KeyboardEvent): void {
 }
 
 function onKeydown(event: KeyboardEvent): void {
-  // The delete dialog is modal. Escape cancels; every other key is left to the
-  // dialog (Delete is focused, arrows move between its buttons, Enter activates
-  // the focused one) instead of reaching the panes or the shell.
-  if (deleteTargets.value.length > 0) {
+  // The dialogs are modal. Escape cancels; every other key is left to the
+  // dialog (its default button is focused, arrows move between the buttons,
+  // Enter activates the focused one) instead of reaching the panes or shell.
+  if (deleteTargets.value.length > 0 || copyJob.value !== null) {
     if (event.key === 'Escape') {
       consume(event)
-      cancelDelete()
+      if (deleteTargets.value.length > 0) cancelDelete()
+      else cancelCopy()
     }
     return
   }
@@ -425,6 +469,14 @@ onBeforeUnmount(() => {
     />
 
     <StatusBar :pane="activePane" :active-side="activeSide" :terminal-open="terminalExpanded" />
+
+    <ConfirmCopy
+      v-if="copyJob"
+      :entries="copyJob.entries"
+      :destination="copyJob.destination"
+      @confirm="confirmCopy"
+      @cancel="cancelCopy"
+    />
 
     <ConfirmDelete
       v-if="deleteTargets.length > 0"

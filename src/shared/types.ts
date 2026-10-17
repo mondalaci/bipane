@@ -47,6 +47,25 @@ export interface DeleteOutcome {
   failed: DeleteFailure[]
 }
 
+export interface CopyFailure {
+  path: string
+  error: FsError
+}
+
+/**
+ * Copying a set of paths is best-effort for the same reason: a collision or an
+ * unreadable entry must not abort the rest, so the call reports `copied`
+ * destinations and the `failed` sources with why they did not go through.
+ * `destination` is the resolved destination directory, so callers can compare
+ * it against a pane's path (a relative destination resolves against the pane
+ * that was copied from, not the process working directory).
+ */
+export interface CopyOutcome {
+  copied: string[]
+  failed: CopyFailure[]
+  destination: string
+}
+
 export interface PtySpawnOptions {
   cwd: string
   cols: number

@@ -44,7 +44,9 @@ export interface PaneController {
   setSelected(path: string, value: boolean): void
   toggleSelection(): void
   clearSelection(): void
+  selectionTargets(): PaneEntry[]
   deletionTargets(): PaneEntry[]
+  copyEntries(destination: string): Promise<string | null>
   deleteEntries(): Promise<void>
   openSearch(): void
   updateSearch(query: string): void
@@ -359,16 +361,52 @@ export function useDirectory(side: PanelSide): PaneController {
   }
 
   /**
-   * What F8 would remove: the marks if any are set, otherwise the entry under
-   * the cursor. The ".." row is never a target, and a filter does not hide a
-   * mark — every mark in the pane is deleted, matched in listing order.
+   * What a transfer acts on: the marks if any are set, otherwise the entry
+   * under the cursor. The ".." row is never a target, and a filter does not
+   * hide a mark — every mark in the pane is used, matched in listing order.
    */
-  function deletionTargets(): PaneEntry[] {
+  function selectionTargets(): PaneEntry[] {
     if (state.selected.size > 0) {
       return state.allRows.filter((row) => !row.isParent && state.selected.has(row.path))
     }
     const entry = current()
     return entry && !entry.isParent ? [entry] : []
+  }
+
+  function deletionTargets(): PaneEntry[] {
+    return selectionTargets()
+  }
+
+  /**
+   * Copy the pane's targets into `destination`. A relative destination is
+   * resolved against this pane's directory, so `sub` means `<pane>/sub` rather
+   * than a path next to the app. Best-effort like delete: entries that collide
+   * or cannot be read are reported without aborting the rest, and the source
+   * listing is re-read in place. Returns the resolved destination directory so
+   * the caller can refresh a pane showing it, or null on failure.
+   */
+  async function copyEntries(destination: string): Promise<string | null> {
+    const targets = selectionTargets()
+    if (targets.length === 0 || !destination) return null
+
+    const result = await window.bipane.fs.copy(
+      targets.map((target) => target.path),
+      destination,
+      state.path
+    )
+    if (!result.ok) {
+      state.error = `${result.error.code}: ${result.error.message}`
+      return null
+    }
+
+    await refresh()
+
+    if (result.data.failed.length > 0) {
+      const [first] = result.data.failed
+      if (first) state.error = `${first.error.code}: ${first.error.message}`
+    }
+
+    return result.data.destination
   }
 
   async function deleteEntries(): Promise<void> {
@@ -435,7 +473,9 @@ export function useDirectory(side: PanelSide): PaneController {
     setSelected,
     toggleSelection,
     clearSelection,
+    selectionTargets,
     deletionTargets,
+    copyEntries,
     deleteEntries,
     openSearch,
     updateSearch,
