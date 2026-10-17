@@ -22,6 +22,8 @@ There is no linter or test runner configured yet.
 ```
 src/main/index.ts        window lifecycle, single-instance lock
 src/main/ipc/fs.ts       IPC: fs:home, fs:list, fs:open, fs:reveal
+src/main/ipc/watch.ts    IPC: fs:watch, fs:unwatch; pushes fs:changed when a
+                         watched directory's contents change (fs.watch = inotify)
 src/main/ipc/pty.ts      IPC: pty:create/write/resize/kill/state, pushes pty:data, pty:exit
 src/main/ipc/window.ts   IPC: window:minimize/toggle-maximize/close/is-maximized
 src/preload/index.ts     contextBridge -> window.bipane (implements BipaneApi)
@@ -100,6 +102,16 @@ it edits the line, and reaching the parent is the `..` row's job.
 - **`pty:state` is Linux-only** (`/proc/<pid>/cwd` for the cwd, `tpgid` in
   `/proc/<pid>/stat` to tell whether the shell is at a prompt). Elsewhere it
   reports `idle: false`, which disables injection rather than guessing.
+- **A pane's directory is watched, not polled.** `useDirectory` subscribes to
+  `fs:changed` for its current `state.path` and re-lists on a match, so files
+  made by another program appear on their own. Main refcounts watchers per
+  webContents id, *not* per directory: both panes can show one directory, and a
+  plain Set would close the shared watcher when the first of them navigated
+  away. Notifications are debounced (200ms trailing edge, but never later than
+  750ms after a burst's first event) because one action (a recursive copy, an
+  editor's write/rename) emits a burst of inotify events — and a pure trailing
+  debounce never fires while events keep arriving, which is exactly a download
+  streaming a `.crdownload` file, so the pane stayed frozen until it finished.
 - **Intercepted keys must `stopPropagation`, not just `preventDefault`.** xterm
   handles keys from a capture listener on its own textarea and does *not* consult
   `defaultPrevented`, so a merely-prevented navigation key is still forwarded to

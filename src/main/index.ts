@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { app, BrowserWindow } from 'electron'
 import { registerFsHandlers } from './ipc/fs'
 import { killAllSessions, registerPtyHandlers } from './ipc/pty'
+import { closeAllWatchers, registerWatchHandlers } from './ipc/watch'
 import { registerWindowHandlers } from './ipc/window'
 
 const APP_BACKGROUND = '#1e1e1e'
@@ -56,6 +57,7 @@ function createWindow(): BrowserWindow {
 
 registerFsHandlers()
 registerPtyHandlers()
+registerWatchHandlers()
 registerWindowHandlers()
 
 const gotLock = app.requestSingleInstanceLock()
@@ -81,5 +83,8 @@ if (!gotLock) {
     if (process.platform !== 'darwin') app.quit()
   })
 
-  app.on('before-quit', () => killAllSessions())
+  app.on('before-quit', () => {
+    killAllSessions()
+    closeAllWatchers()
+  })
 }

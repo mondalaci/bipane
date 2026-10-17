@@ -4,6 +4,7 @@ import type {
   CopyOutcome,
   DeleteOutcome,
   DirListing,
+  FsChangeEvent,
   MoveOutcome,
   PtyDataEvent,
   PtyExitEvent,
@@ -32,7 +33,14 @@ const api: BipaneApi = {
     ): Promise<Result<MoveOutcome>> =>
       ipcRenderer.invoke('fs:move', sources, destination, baseDir),
     remove: (targets: string[]): Promise<Result<DeleteOutcome>> =>
-      ipcRenderer.invoke('fs:delete', targets)
+      ipcRenderer.invoke('fs:delete', targets),
+    watch: (dir: string): Promise<void> => ipcRenderer.invoke('fs:watch', dir),
+    unwatch: (dir: string): Promise<void> => ipcRenderer.invoke('fs:unwatch', dir),
+    onChanged: (handler: (event: FsChangeEvent) => void) => {
+      const listener = (_event: IpcRendererEvent, payload: FsChangeEvent) => handler(payload)
+      ipcRenderer.on('fs:changed', listener)
+      return () => ipcRenderer.off('fs:changed', listener)
+    }
   },
   pty: {
     create: (id: string, options: PtySpawnOptions) =>

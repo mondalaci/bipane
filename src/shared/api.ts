@@ -2,6 +2,7 @@ import type {
   CopyOutcome,
   DeleteOutcome,
   DirListing,
+  FsChangeEvent,
   MoveOutcome,
   PtyDataEvent,
   PtyExitEvent,
@@ -19,6 +20,13 @@ export interface BipaneFsApi {
   copy(sources: string[], destination: string, baseDir: string): Promise<Result<CopyOutcome>>
   move(sources: string[], destination: string, baseDir: string): Promise<Result<MoveOutcome>>
   remove(targets: string[]): Promise<Result<DeleteOutcome>>
+  /**
+   * Watch a directory for on-disk changes. Refcounted in main, so several
+   * callers (both panes, or the same pane twice) may watch one directory.
+   */
+  watch(dir: string): Promise<void>
+  unwatch(dir: string): Promise<void>
+  onChanged(handler: (event: FsChangeEvent) => void): () => void
 }
 
 export interface BipanePtyApi {

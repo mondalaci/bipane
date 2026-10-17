@@ -1,4 +1,4 @@
-import { reactive } from 'vue'
+import { onScopeDispose, reactive } from 'vue'
 import type { DirEntry, DirListing, PanelSide } from '@shared/types'
 
 export type PaneEntry = DirEntry & { isParent?: boolean }
@@ -236,6 +236,40 @@ export function useDirectory(side: PanelSide): PaneController {
     await navigateTo(state.path, result.data)
   }
 
+  /**
+   * Auto-refresh: main watches the pane's current directory and pushes a change
+   * event whenever its contents change on disk, so a file created or removed by
+   * another program (or by a shell command) appears without re-entering the
+   * directory. The subscription follows `state.path` — retargeted on navigate
+   * and refresh — and is refcounted in main so both panes may watch one
+   * directory. Release happens when the pane moves on or the app unmounts.
+   */
+  let watchedPath: string | null = null
+
+  function unwatchCurrent(): void {
+    if (watchedPath === null) return
+    const dir = watchedPath
+    watchedPath = null
+    void window.bipane.fs.unwatch(dir)
+  }
+
+  function watchCurrent(): void {
+    if (state.path === watchedPath) return
+    unwatchCurrent()
+    if (!state.path) return
+    watchedPath = state.path
+    void window.bipane.fs.watch(state.path)
+  }
+
+  const stopWatching = window.bipane.fs.onChanged((event) => {
+    if (event.path === state.path) void refresh()
+  })
+
+  onScopeDispose(() => {
+    stopWatching()
+    unwatchCurrent()
+  })
+
   async function navigateTo(dir: string, focusPath?: string): Promise<void> {
     state.loading = true
     state.error = null
@@ -262,6 +296,7 @@ export function useDirectory(side: PanelSide): PaneController {
     state.searchQuery = ''
     state.selected.clear()
     state.renaming = null
+    watchCurrent()
   }
 
   function indexOfPath(rows: PaneEntry[], target: string): number {
@@ -291,6 +326,7 @@ export function useDirectory(side: PanelSide): PaneController {
     state.parent = result.data.parent
     state.allRows = rows
     applyFilter(previous)
+    watchCurrent()
   }
 
   async function goUp(): Promise<void> {

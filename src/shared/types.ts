@@ -31,6 +31,15 @@ export interface FsError {
   message: string
 }
 
+/**
+ * Pushed to the renderer when a watched directory's contents change on disk, so
+ * a pane showing that directory can re-list itself instead of polling. `path` is
+ * the resolved directory that was watched, matching `DirListing.path`.
+ */
+export interface FsChangeEvent {
+  path: string
+}
+
 export type Result<T> = { ok: true; data: T } | { ok: false; error: FsError }
 
 export interface DeleteFailure {
