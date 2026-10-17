@@ -1,11 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import type {
-  PaneController,
-  PaneEntry,
-  ScrollAlign
-} from '@renderer/composables/useDirectory'
+import type { PaneController, ScrollAlign } from '@renderer/composables/useDirectory'
 import { formatDate, formatSize } from '@renderer/lib/format'
+import FileIcon from '@renderer/components/FileIcon.vue'
 
 const ROW_HEIGHT = 22
 
@@ -122,13 +119,6 @@ function rowClass(index: number): string {
   return props.active ? 'bg-selection text-fg-bright' : 'bg-selection-inactive text-fg'
 }
 
-function iconClass(entry: PaneEntry): string {
-  if (entry.isParent) return 'text-fg-dim'
-  if (entry.isSymlink) return 'text-accent-strong'
-  if (entry.kind === 'directory') return 'text-folder'
-  return 'text-fg-dim'
-}
-
 function metaClass(index: number): string {
   return index === props.controller.state.cursor ? 'text-fg' : 'text-fg-dim'
 }
@@ -216,41 +206,8 @@ function metaClass(index: number): string {
         @click="onRowClick(index)"
         @dblclick="controller.activate()"
       >
-        <span class="flex w-4 shrink-0 items-center justify-center" :class="iconClass(entry)">
-          <svg
-            v-if="entry.isParent"
-            viewBox="0 0 24 24"
-            class="h-3.5 w-3.5"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            aria-hidden="true"
-          >
-            <path d="M12 19V5" />
-            <path d="m5 12 7-7 7 7" />
-          </svg>
-          <svg
-            v-else-if="entry.kind === 'directory'"
-            viewBox="0 0 24 24"
-            class="h-3.5 w-3.5"
-            fill="currentColor"
-            aria-hidden="true"
-          >
-            <path
-              d="M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2z"
-            />
-          </svg>
-          <svg
-            v-else
-            viewBox="0 0 24 24"
-            class="h-3.5 w-3.5"
-            fill="currentColor"
-            aria-hidden="true"
-          >
-            <path d="M6 2a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-4-4V2H6zm7 1.5L18.5 9H13V3.5z" />
-          </svg>
+        <span class="flex w-4 shrink-0 items-center justify-center">
+          <FileIcon :entry="entry" />
         </span>
 
         <span class="min-w-0 flex-1 truncate" :title="entry.path">{{ entry.name }}</span>
