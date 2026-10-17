@@ -16,6 +16,7 @@ const shellCwd = shell.cwd
 const shellIdle = shell.idle
 const shellStarted = shell.started
 const shellInput = shell.inputLine
+const shellCommand = shell.commandSeq
 
 const activeSide = ref<PanelSide>('left')
 const terminalExpanded = ref(false)
@@ -131,6 +132,56 @@ watch(shellCwd, (next) => {
 
   if (next === activePanePath.value) return
   void activePane.value.navigateTo(next)
+})
+
+/**
+ * A command can add or remove entries without changing the cwd, which is the
+ * only thing the panel otherwise reacts to — so `touch newfile` leaves the list
+ * stale until the directory is re-entered. Re-list the pane the shell ran in
+ * once the command finishes.
+ *
+ * The tricky part is noticing "finished": a fast command is over before the
+ * next 300ms state poll, so it never shows up as busy and there is no idle
+ * transition to wait for. After a short settle we therefore force a fresh read
+ * and treat "already idle" as a completed command; a command still running
+ * shows up busy here and the idle watch finishes the job when it exits.
+ */
+const COMMAND_SETTLE_MS = 150
+
+let commandPending = false
+let commandSettleTimer: number | null = null
+
+function refreshPanelsAtShellCwd(): void {
+  const target = shellCwd.value
+  if (!target) return
+  for (const pane of [left, right]) {
+    if (pane.state.path === target) void pane.refresh()
+  }
+}
+
+function noteCommandSubmitted(): void {
+  commandPending = true
+  if (commandSettleTimer !== null) window.clearTimeout(commandSettleTimer)
+  commandSettleTimer = window.setTimeout(() => {
+    commandSettleTimer = null
+    void settleCommand()
+  }, COMMAND_SETTLE_MS)
+}
+
+async function settleCommand(): Promise<void> {
+  if (!commandPending) return
+  await shell.refreshState()
+  if (!commandPending || !shellIdle.value) return
+  commandPending = false
+  refreshPanelsAtShellCwd()
+}
+
+watch(shellCommand, noteCommandSubmitted)
+
+watch(shellIdle, (idleNow) => {
+  if (!idleNow || !commandPending) return
+  commandPending = false
+  refreshPanelsAtShellCwd()
 })
 
 /**
@@ -265,6 +316,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  if (commandSettleTimer !== null) window.clearTimeout(commandSettleTimer)
   window.removeEventListener('keydown', onKeydown, { capture: true })
 })
 </script>

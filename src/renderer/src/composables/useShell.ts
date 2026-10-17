@@ -21,6 +21,13 @@ const idle = ref(false)
  */
 const inputLine = ref('')
 
+/**
+ * Incremented whenever the user submits a non-empty line, i.e. the shell is
+ * about to run a command. Panels listen to it to re-list their directory once
+ * that command finishes, since a command need not change the cwd.
+ */
+const commandSeq = ref(0)
+
 let lineBuffer = ''
 
 const dataListeners = new Set<(data: string) => void>()
@@ -116,7 +123,14 @@ function noteInput(data: string): void {
   for (const char of data) {
     const code = char.codePointAt(0) ?? 0
 
-    if (code === 13 || code === 10 || code === 3 || code === 21) {
+    if (code === 13 || code === 10) {
+      // Enter: a non-empty line is a command the shell is about to run, not
+      // just an empty prompt line, so it is worth re-listing for.
+      if (lineBuffer.length > 0) commandSeq.value++
+      lineBuffer = ''
+      continue
+    }
+    if (code === 3 || code === 21) {
       lineBuffer = ''
       continue
     }
@@ -177,11 +191,13 @@ export function useShell() {
     cwd,
     idle,
     inputLine,
+    commandSeq,
     ensureStarted,
     write,
     sendInput,
     clearInputLine,
     noteInput,
+    refreshState,
     resize,
     attachTerminal
   }

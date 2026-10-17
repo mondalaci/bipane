@@ -25,6 +25,7 @@ export interface PaneController {
   readonly state: PaneState
   init(): Promise<void>
   navigateTo(dir: string, focusPath?: string): Promise<void>
+  refresh(): Promise<void>
   goUp(): Promise<void>
   moveCursor(delta: number): void
   movePage(direction: 1 | -1): void
@@ -104,8 +105,7 @@ export function useDirectory(side: PanelSide): PaneController {
     return Math.min(Math.max(value, 0), last)
   }
 
-  function applyFilter(): void {
-    const previous = current()
+  function applyFilter(previous: PaneEntry | undefined = current()): void {
     const needle = state.searchQuery.trim().toLowerCase()
 
     state.entries = needle
@@ -179,6 +179,30 @@ export function useDirectory(side: PanelSide): PaneController {
     return index >= 0 ? index : 0
   }
 
+  /**
+   * Re-list the current directory in place. Unlike navigateTo this keeps the
+   * cursor on the same entry (matching by path, so it follows a rename-free
+   * re-sort) and leaves any active filter alone: a command that adds or removes
+   * a file should not also throw away where the user was looking.
+   */
+  async function refresh(): Promise<void> {
+    if (!state.path || state.loading) return
+
+    const result = await window.bipane.fs.list(state.path)
+    if (!result.ok) {
+      state.error = `${result.error.code}: ${result.error.message}`
+      return
+    }
+
+    const previous = current()
+    const rows = toRows(result.data)
+    state.error = null
+    state.path = result.data.path
+    state.parent = result.data.parent
+    state.allRows = rows
+    applyFilter(previous)
+  }
+
   async function goUp(): Promise<void> {
     if (!state.parent) return
     // Park the cursor on the directory we came from.
@@ -243,6 +267,7 @@ export function useDirectory(side: PanelSide): PaneController {
     state,
     init,
     navigateTo,
+    refresh,
     goUp,
     moveCursor,
     movePage,
