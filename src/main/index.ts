@@ -6,6 +6,7 @@ import { killAllSessions, registerPtyHandlers } from './ipc/pty'
 import { registerWindowHandlers } from './ipc/window'
 
 const APP_BACKGROUND = '#1e1e1e'
+const APP_ICON = join(import.meta.dirname, '..', '..', 'resources', 'icon.png')
 
 function resolvePreload(): string {
   const candidates = ['index.mjs', 'index.js'].map((file) =>
@@ -23,6 +24,7 @@ function createWindow(): BrowserWindow {
     show: false,
     title: 'Bipane',
     backgroundColor: APP_BACKGROUND,
+    icon: APP_ICON,
     frame: false,
     webPreferences: {
       preload: resolvePreload(),

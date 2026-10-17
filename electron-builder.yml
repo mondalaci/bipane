@@ -6,10 +6,12 @@ directories:
 files:
   - out/**
   - package.json
+  - resources/icon.png
 asarUnpack:
   - node_modules/node-pty/**
 npmRebuild: true
 linux:
+  icon: resources/icon.png
   target:
     - AppImage
     - deb
