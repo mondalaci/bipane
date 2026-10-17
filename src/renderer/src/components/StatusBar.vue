@@ -12,6 +12,7 @@ const props = defineProps<{
 
 const entry = computed(() => props.pane.current())
 const itemCount = computed(() => props.pane.state.itemCount)
+const selectedCount = computed(() => props.pane.selectedCount())
 </script>
 
 <template>
@@ -36,11 +37,17 @@ const itemCount = computed(() => props.pane.state.itemCount)
 
       <span class="tabular-nums">{{ itemCount }} items</span>
 
+      <span v-if="selectedCount > 0" class="tabular-nums text-selected">
+        {{ selectedCount }} selected
+      </span>
+
       <span class="hidden items-center gap-1 md:flex">
         <kbd class="rounded border border-border bg-bg-alt px-1 font-mono text-2xs">Tab</kbd>
         <span>switch</span>
         <kbd class="rounded border border-border bg-bg-alt px-1 font-mono text-2xs">↵</kbd>
         <span>open</span>
+        <kbd class="rounded border border-border bg-bg-alt px-1 font-mono text-2xs">Ins</kbd>
+        <span>select</span>
         <kbd class="rounded border border-border bg-bg-alt px-1 font-mono text-2xs">Alt+S</kbd>
         <span>find</span>
         <kbd class="rounded border border-border bg-bg-alt px-1 font-mono text-2xs">Ctrl+O</kbd>

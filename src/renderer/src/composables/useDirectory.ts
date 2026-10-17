@@ -17,6 +17,7 @@ export interface PaneState {
   scrollAlign: ScrollAlign
   searchActive: boolean
   searchQuery: string
+  selected: Set<string>
   loading: boolean
   error: string | null
 }
@@ -32,6 +33,11 @@ export interface PaneController {
   moveTo(index: number): void
   activate(): Promise<void>
   current(): PaneEntry | undefined
+  isSelected(entry: PaneEntry): boolean
+  selectedCount(): number
+  setSelected(path: string, value: boolean): void
+  toggleSelection(): void
+  clearSelection(): void
   openSearch(): void
   updateSearch(query: string): void
   closeSearch(): void
@@ -91,6 +97,7 @@ export function useDirectory(side: PanelSide): PaneController {
     scrollAlign: 'nearest',
     searchActive: false,
     searchQuery: '',
+    selected: new Set<string>(),
     loading: false,
     error: null
   })
@@ -169,9 +176,10 @@ export function useDirectory(side: PanelSide): PaneController {
     state.cursor = focusPath ? indexOfPath(rows, focusPath) : 0
     state.scrollAlign = 'nearest'
 
-    // A filter belongs to the directory it was typed in.
+    // A filter and the marks belong to the directory they were set in.
     state.searchActive = false
     state.searchQuery = ''
+    state.selected.clear()
   }
 
   function indexOfPath(rows: PaneEntry[], target: string): number {
@@ -236,6 +244,41 @@ export function useDirectory(side: PanelSide): PaneController {
     state.cursor = clampCursorTo(index)
   }
 
+  /**
+   * Marks are keyed by absolute path, so they survive a re-sort and a refresh
+   * of the same directory — navigating to another directory clears them. The
+   * ".." row is never selectable.
+   */
+  function isSelected(entry: PaneEntry): boolean {
+    return !entry.isParent && state.selected.has(entry.path)
+  }
+
+  function selectedCount(): number {
+    return state.selected.size
+  }
+
+  function setSelected(path: string, value: boolean): void {
+    if (value) state.selected.add(path)
+    else state.selected.delete(path)
+  }
+
+  function toggleSelection(): void {
+    const entry = current()
+    if (!entry || entry.isParent) return
+
+    if (state.selected.has(entry.path)) state.selected.delete(entry.path)
+    else state.selected.add(entry.path)
+
+    // Marking advances the cursor so a column of files can be picked in one
+    // pass, exactly like the classic dual-pane Insert key.
+    moveCursor(1)
+  }
+
+  function clearSelection(): void {
+    if (state.selected.size === 0) return
+    state.selected.clear()
+  }
+
   async function activate(): Promise<void> {
     const entry = current()
     if (!entry) return
@@ -274,6 +317,11 @@ export function useDirectory(side: PanelSide): PaneController {
     moveTo,
     activate,
     current,
+    isSelected,
+    selectedCount,
+    setSelected,
+    toggleSelection,
+    clearSelection,
     openSearch,
     updateSearch,
     closeSearch

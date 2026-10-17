@@ -89,11 +89,13 @@ onMounted(() => {
   listObserver = new ResizeObserver(measurePageRows)
   if (listEl.value) listObserver.observe(listEl.value)
   measurePageRows()
+  window.addEventListener('mouseup', endPainting)
 })
 
 onBeforeUnmount(() => {
   listObserver?.disconnect()
   listObserver = null
+  window.removeEventListener('mouseup', endPainting)
 })
 
 function onSearchInput(event: Event): void {
@@ -114,6 +116,35 @@ function onRowClick(index: number): void {
   props.controller.moveTo(index)
 }
 
+/**
+ * Right-click marks a row, and holding the button paints that mark across
+ * every row the pointer enters — the swipe-to-select gesture. The paint mode
+ * is decided once, from the row the gesture started on: starting on an
+ * unmarked row selects, starting on a marked row clears.
+ */
+let painting: { select: boolean } | null = null
+
+function onRowRightDown(index: number, event: MouseEvent): void {
+  const entry = props.controller.state.entries[index]
+  if (!entry || entry.isParent) return
+  event.preventDefault()
+
+  const select = !props.controller.isSelected(entry)
+  props.controller.setSelected(entry.path, select)
+  painting = { select }
+}
+
+function onRowEnter(index: number): void {
+  if (!painting) return
+  const entry = props.controller.state.entries[index]
+  if (!entry || entry.isParent) return
+  props.controller.setSelected(entry.path, painting.select)
+}
+
+function endPainting(): void {
+  painting = null
+}
+
 function rowClass(index: number): string {
   if (index !== props.controller.state.cursor) return 'text-fg hover:bg-hover'
   return props.active ? 'bg-selection text-fg-bright' : 'bg-selection-inactive text-fg'
@@ -125,7 +156,7 @@ function metaClass(index: number): string {
 </script>
 
 <template>
-  <section class="flex min-w-0 flex-1 flex-col" @mousedown="onPointerDown">
+  <section class="flex min-w-0 flex-1 flex-col" @mousedown="onPointerDown" @contextmenu.prevent>
     <div
       class="flex h-9 shrink-0 items-center gap-2 border-b border-border-subtle bg-surface px-3"
       :class="active ? 'text-fg' : 'text-fg-dim'"
@@ -203,6 +234,9 @@ function metaClass(index: number): string {
         class="flex cursor-default items-center gap-2 px-3 text-ui"
         :style="{ height: `${ROW_HEIGHT}px` }"
         :class="rowClass(index)"
+        @mousedown.right="onRowRightDown(index, $event)"
+        @mouseenter="onRowEnter(index)"
+        @contextmenu.prevent
         @click="onRowClick(index)"
         @dblclick="controller.activate()"
       >
@@ -210,7 +244,12 @@ function metaClass(index: number): string {
           <FileIcon :entry="entry" />
         </span>
 
-        <span class="min-w-0 flex-1 truncate" :title="entry.path">{{ entry.name }}</span>
+        <span
+          class="min-w-0 flex-1 truncate"
+          :class="controller.isSelected(entry) ? 'text-selected' : ''"
+          :title="entry.path"
+          >{{ entry.name }}</span
+        >
 
         <span
           v-if="entry.isSymlink && entry.symlinkTarget"

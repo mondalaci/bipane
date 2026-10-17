@@ -256,6 +256,10 @@ function handlePaneKey(event: KeyboardEvent): void {
       consume(event)
       pane.moveTo(pane.state.entries.length - 1)
       break
+    case 'Insert':
+      consume(event)
+      pane.toggleSelection()
+      break
     case 'Enter':
       // With a line typed, fall through to the shell and leave the terminal
       // exactly as the user left it.
