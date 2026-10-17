@@ -112,6 +112,16 @@ it edits the line, and reaching the parent is the `..` row's job.
   editor's write/rename) emits a burst of inotify events — and a pure trailing
   debounce never fires while events keep arriving, which is exactly a download
   streaming a `.crdownload` file, so the pane stayed frozen until it finished.
+- **A refresh highlights what changed.** `useDirectory` diffs each re-list and
+  marks entries that are new or whose size/mtime/kind changed into `fresh`;
+  `FilePanel` puts `flash-row` on those rows, which runs the looping
+  `flash-sweep` animation in `styles/flash.css`. The clear timer is re-armed by
+  every refresh, so a one-off change sweeps exactly once while a file still
+  being written (a download) keeps sweeping until a full cycle passes with no
+  change. The gradient holds two peaks and never reaches zero alpha and scrolls
+  one period per cycle — a single band with a blank tail leaves a dead beat
+  between passes, which reads as the animation stalling. A batch over 150
+  entries is skipped so a big copy or checkout cannot animate hundreds of rows.
 - **Intercepted keys must `stopPropagation`, not just `preventDefault`.** xterm
   handles keys from a capture listener on its own textarea and does *not* consult
   `defaultPrevented`, so a merely-prevented navigation key is still forwarded to

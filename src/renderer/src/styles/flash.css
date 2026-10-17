@@ -1,0 +1,39 @@
+/*
+ * Transient highlight for entries a directory refresh found new or changed
+ * (see useDirectory's `fresh` map). A row carries `flash-row` while it is
+ * "hot", and the band keeps travelling for as long as it stays hot: a file
+ * written once is hot for exactly one cycle, while a file being streamed to —
+ * a download — keeps re-arming that window and so keeps sweeping until the
+ * writes stop.
+ *
+ * The gradient holds two peaks (a period of 50% of the image) and never reaches
+ * zero alpha, and it scrolls by exactly one period per cycle. That is what makes
+ * the sweep continuous: a band is always somewhere on the row (so there is no
+ * dead beat between passes, which a single band with a blank tail cannot avoid)
+ * and the loop is seamless because the image is periodic with the travel.
+ */
+.flash-row {
+  background-image: linear-gradient(
+    90deg,
+    rgba(17, 119, 187, 0.1) 0%,
+    rgba(17, 119, 187, 0.1) 12%,
+    rgba(17, 119, 187, 0.85) 25%,
+    rgba(17, 119, 187, 0.1) 38%,
+    rgba(17, 119, 187, 0.1) 50%,
+    rgba(17, 119, 187, 0.1) 62%,
+    rgba(17, 119, 187, 0.85) 75%,
+    rgba(17, 119, 187, 0.1) 88%,
+    rgba(17, 119, 187, 0.1) 100%
+  );
+  background-size: 200% 100%;
+  animation: flash-sweep 1.6s linear infinite;
+}
+
+@keyframes flash-sweep {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: 100% 0;
+  }
+}

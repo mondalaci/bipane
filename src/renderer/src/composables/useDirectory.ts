@@ -26,6 +26,12 @@ export interface PaneState {
    * pane is not editing.
    */
   renaming: string | null
+  /**
+   * Paths a refresh just found new or changed. Membership alone drives the
+   * row's transient highlight, and the set is emptied shortly after each batch
+   * (and on navigation) so a later change replays the animation.
+   */
+  fresh: Set<string>
 }
 
 export interface PaneController {
@@ -109,6 +115,41 @@ function firstMatchIndex(rows: PaneEntry[]): number {
   return index >= 0 ? index : 0
 }
 
+/**
+ * One animation cycle (see flash.css). A row whose change is a one-off sweeps
+ * exactly once; a row that keeps changing has this timer re-armed by every
+ * refresh, so it stays highlighted — and keeps sweeping — until a full cycle
+ * passes with no further change.
+ */
+const FLASH_MS = 1600
+
+/**
+ * A refresh reporting more changes than this is a bulk operation (a large copy,
+ * a checkout, a `git switch`) — hundreds of simultaneous animations would jank
+ * the list to say nothing useful, so such a batch is not highlighted at all.
+ */
+const FLASH_MAX = 150
+
+/**
+ * Which entries a re-list found new or altered, by path. "Altered" is a changed
+ * size, mtime or kind, which is exactly what the row's metadata columns show, so
+ * a rewritten file is highlighted for the same reason a fresh one is.
+ */
+function diffEntries(before: PaneEntry[], after: PaneEntry[]): Set<string> {
+  const seen = new Map<string, PaneEntry>()
+  for (const row of before) seen.set(row.path, row)
+
+  const changed = new Set<string>()
+  for (const row of after) {
+    if (row.isParent) continue
+    const old = seen.get(row.path)
+    if (!old || old.size !== row.size || old.mtimeMs !== row.mtimeMs || old.kind !== row.kind) {
+      changed.add(row.path)
+    }
+  }
+  return changed
+}
+
 export function useDirectory(side: PanelSide): PaneController {
   const state = reactive<PaneState>({
     side,
@@ -125,7 +166,8 @@ export function useDirectory(side: PanelSide): PaneController {
     selected: new Set<string>(),
     loading: false,
     error: null,
-    renaming: null
+    renaming: null,
+    fresh: new Set<string>()
   })
 
   function current(): PaneEntry | undefined {
@@ -246,6 +288,32 @@ export function useDirectory(side: PanelSide): PaneController {
    */
   let watchedPath: string | null = null
 
+  /**
+   * Clears highlighted rows one cycle after the last change. Re-armed by every
+   * refresh, which is what keeps a row that is still being written to sweeping
+   * instead of settling after its first pass.
+   */
+  let flashTimer: number | null = null
+
+  function clearFresh(): void {
+    if (flashTimer !== null) {
+      window.clearTimeout(flashTimer)
+      flashTimer = null
+    }
+    state.fresh.clear()
+  }
+
+  function markFresh(paths: Set<string>): void {
+    if (paths.size === 0 || paths.size > FLASH_MAX) return
+    for (const path of paths) state.fresh.add(path)
+
+    if (flashTimer !== null) window.clearTimeout(flashTimer)
+    flashTimer = window.setTimeout(() => {
+      flashTimer = null
+      state.fresh.clear()
+    }, FLASH_MS)
+  }
+
   function unwatchCurrent(): void {
     if (watchedPath === null) return
     const dir = watchedPath
@@ -268,6 +336,7 @@ export function useDirectory(side: PanelSide): PaneController {
   onScopeDispose(() => {
     stopWatching()
     unwatchCurrent()
+    clearFresh()
   })
 
   async function navigateTo(dir: string, focusPath?: string): Promise<void> {
@@ -296,6 +365,7 @@ export function useDirectory(side: PanelSide): PaneController {
     state.searchQuery = ''
     state.selected.clear()
     state.renaming = null
+    clearFresh()
     watchCurrent()
   }
 
@@ -319,6 +389,9 @@ export function useDirectory(side: PanelSide): PaneController {
       return
     }
 
+    // Captured before `allRows` is replaced, so the diff below compares the
+    // listing as it was against the listing just read.
+    const before = state.allRows
     const previous = current()
     const rows = toRows(result.data)
     state.error = null
@@ -326,6 +399,7 @@ export function useDirectory(side: PanelSide): PaneController {
     state.parent = result.data.parent
     state.allRows = rows
     applyFilter(previous)
+    markFresh(diffEntries(before, rows))
     watchCurrent()
   }
 

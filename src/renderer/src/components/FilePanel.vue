@@ -147,8 +147,17 @@ function endPainting(): void {
 }
 
 function rowClass(index: number): string {
-  if (index !== props.controller.state.cursor) return 'text-fg hover:bg-hover'
-  return props.active ? 'bg-selection text-fg-bright' : 'bg-selection-inactive text-fg'
+  const base =
+    index !== props.controller.state.cursor
+      ? 'text-fg hover:bg-hover'
+      : props.active
+        ? 'bg-selection text-fg-bright'
+        : 'bg-selection-inactive text-fg'
+
+  // `fresh` holds the paths a refresh just found new or changed; membership is
+  // all the row needs to run its highlight (see styles/flash.css).
+  const entry = props.controller.state.entries[index]
+  return entry && props.controller.state.fresh.has(entry.path) ? `${base} flash-row` : base
 }
 
 function metaClass(index: number): string {
