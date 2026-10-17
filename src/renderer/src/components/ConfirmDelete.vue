@@ -77,7 +77,7 @@ function onKey(event: KeyboardEvent): void {
         </p>
       </div>
 
-      <div class="flex justify-end gap-2 border-t border-border-subtle bg-bg-alt px-4 py-3">
+      <div class="flex justify-end gap-2 border-t border-border-subtle px-4 py-3">
         <button
           ref="cancelButton"
           type="button"
