@@ -38,7 +38,16 @@ function refit(): void {
   const element = host.value
   if (!element || element.clientWidth === 0 || element.clientHeight === 0) return
   fitAddon.fit()
-  shell.resize(term.cols, term.rows)
+  // The panel -> shell `cd` sync erases its own echo with `printf
+  // '\033[1A\033[2K'`, which walks back one row and clears it. That needs a
+  // spare row below the cursor: a one-row terminal scrolls on every newline, so
+  // the echoed `cd` leaves the viewport for the scrollback before the `printf`
+  // runs, and Ctrl+O then shows a transcript of syncs the user never typed.
+  // Two rows keep the sync on screen for its own erase to clear, so the strip is
+  // both sized for (basis-11) and clamped to two rows here.
+  const rows = Math.max(term.rows, 2)
+  if (rows !== term.rows) term.resize(term.cols, rows)
+  shell.resize(term.cols, rows)
 }
 
 function scheduleRefit(): void {
@@ -169,7 +178,7 @@ defineExpose({ focusTerminal })
   <section
     ref="root"
     class="flex min-h-0 flex-col overflow-hidden border-t border-border bg-bg transition-[flex-grow,flex-basis] duration-150 ease-out"
-    :class="expanded ? 'grow basis-0' : 'grow-0 shrink-0 basis-7'"
+    :class="expanded ? 'grow basis-0' : 'grow-0 shrink-0 basis-11'"
     @focusin="emit('focused-change', true)"
     @focusout="onFocusOut"
   >
@@ -200,6 +209,10 @@ defineExpose({ focusTerminal })
       </button>
     </div>
 
-    <div ref="host" class="min-h-0 flex-1 overflow-hidden px-3 py-1"></div>
+    <div
+      ref="host"
+      class="min-h-0 flex-1 overflow-hidden px-3"
+      :class="expanded ? 'py-1' : 'py-px'"
+    ></div>
   </section>
 </template>

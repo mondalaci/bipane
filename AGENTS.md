@@ -61,7 +61,7 @@ cursor row in place, and `F8` deletes them after confirmation.
 `Backspace` never navigates: it belongs to the shell's line
 editor (or the search box), so the `..` row is the way up.
 
-The bottom strip is the shell itself: the same xterm, collapsed to one row,
+The bottom strip is the shell itself: the same xterm, collapsed to two rows,
 so the prompt, font and echo are the shell's own rather than a look-alike
 widget. `Ctrl+O` expands it into the full terminal, which then owns the
 keyboard outright. While it is collapsed, printable characters go to the shell
@@ -146,7 +146,12 @@ it edits the line, and reaching the parent is the `..` row's job.
   injected line carries a trailing `printf '\033[1A\033[2K'` that walks back
   over the echo and clears it, so only the new prompt shows. `&&` keeps a failed
   `cd` visible as an error. Gating on an empty input line is what stops the
-  injection from being appended to a half-typed command.
+  injection from being appended to a half-typed command. This erase only works
+  while the terminal has a row to spare: a **one-row** terminal scrolls on every
+  newline, so the echoed `cd` leaves the viewport for the scrollback before the
+  `printf` runs, and `Ctrl+O` then shows a transcript of them. `refit()` in
+  `TerminalPane` therefore clamps the terminal to at least two rows and the
+  collapsed strip is sized (`basis-11`) to show both.
 - **The shell is app-level; the terminal view does not own it.** `TerminalPane`
   must not kill it on unmount — main reaps sessions when the window goes away.
   Killing it there let any remount (a Vue HMR update, a reload) race a fresh
