@@ -210,6 +210,22 @@ function switchWorkspace(delta: number): void {
 }
 
 /**
+ * Move a tab to another position in the strip, keeping it active. The list is a
+ * shallowRef, so a splice has to go through a fresh array for the change to be
+ * seen. Used by both Shift+Ctrl+PageUp/PageDown and drag-and-drop.
+ */
+function moveWorkspace(from: number, to: number): void {
+  const count = workspaces.value.length
+  if (from === to || from < 0 || from >= count || to < 0 || to >= count) return
+  const next = [...workspaces.value]
+  const [moved] = next.splice(from, 1)
+  next.splice(to, 0, moved!)
+  workspaces.value = next
+  activeIndex.value = to
+  void nextTick(() => focusPanes())
+}
+
+/**
  * F3 opens a regular file read-only in the Monaco viewer, F4 opens it for
  * editing. Directories keep their previous F3 meaning (descend), and anything
  * that is not a regular file — a socket, FIFO or device — is left alone rather
@@ -354,6 +370,10 @@ function consume(event: KeyboardEvent): void {
 
 function isPlainCtrl(event: KeyboardEvent): boolean {
   return event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey
+}
+
+function isCtrlShift(event: KeyboardEvent): boolean {
+  return event.ctrlKey && event.shiftKey && !event.altKey && !event.metaKey
 }
 
 function handlePaneKey(event: KeyboardEvent): void {
@@ -552,6 +572,14 @@ function onKeydown(event: KeyboardEvent): void {
     return
   }
 
+  // Shift+Ctrl+PageUp/PageDown reorder the active tab rather than stepping to
+  // another one. Claimed globally, like the plain-Ctrl tab keys below.
+  if (isCtrlShift(event) && (event.key === 'PageUp' || event.key === 'PageDown')) {
+    consume(event)
+    moveWorkspace(activeIndex.value, activeIndex.value + (event.key === 'PageUp' ? -1 : 1))
+    return
+  }
+
   // Workspace tabs are claimed globally, like Ctrl+O and Ctrl+R, so they manage
   // tabs even while the expanded terminal owns the keyboard.
   if (isPlainCtrl(event)) {
@@ -618,6 +646,7 @@ onBeforeUnmount(() => {
         @select="selectWorkspace"
         @close="closeWorkspace"
         @create="addWorkspace"
+        @reorder="moveWorkspace"
       />
     </TitleBar>
 

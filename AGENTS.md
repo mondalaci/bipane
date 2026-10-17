@@ -63,7 +63,9 @@ rows, `Ctrl+O` toggles the terminal, `Ctrl+R` re-lists the active pane,
 `Ctrl+T` opens a new terminal — a fresh workspace (two panes at home plus a new
 shell) at the right of the tab strip, focused — `Ctrl+W` closes the active one
 (the last workspace is never closed), `Ctrl+PageDown`/`Ctrl+PageUp` step to the
-next/previous workspace, `Ctrl+U` swaps the two panels (each keeps its cursor,
+next/previous workspace, `Shift+Ctrl+PageDown`/`Shift+Ctrl+PageUp` (or dragging a
+tab) move the active workspace right/left in the strip, `Ctrl+U` swaps the two
+panels (each keeps its cursor,
 marks and filter),
 `Alt+S` starts an incremental search, `F5` copies the marked entries (or the
 cursor row) into the other pane, `F6` moves them there (its destination field
