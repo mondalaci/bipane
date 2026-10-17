@@ -188,10 +188,14 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   while the terminal has a row to spare: a **one-row** terminal scrolls on every
   newline, so the echoed `cd` leaves the viewport for the scrollback before the
   `printf` runs, and `Ctrl+O` then shows a transcript of them. `refit()` in
-  `TerminalPane` therefore clamps the terminal to at least two rows. The strip
-  itself shows only the first row (`basis-7`, whose content box is one row tall),
-  so the spare row is clipped away as geometry the erase needs rather than a
-  second visible line — a wrapped command's overflow is clipped with it.
+  `TerminalPane` therefore clamps the terminal to at least two rows, and the
+  collapsed strip clips the spare row away rather than showing it. What is
+  visible must be the row the **cursor** is on, not the top of the buffer: the
+  strip is the command line, so `applyStripViewport()` measures a row's height,
+  sizes the host's content box to exactly that, and shifts the terminal up so the
+  cursor's row lands inside it. Leaving the terminal at the top instead showed
+  the row *above* the cursor — after `ls`, the last output line rather than the
+  prompt sitting under it.
 - **The shell outlives its view; the terminal view does not own it.**
   `TerminalPane` must not kill it on unmount — main reaps sessions when the
   window goes away, and a workspace kills its own session only through

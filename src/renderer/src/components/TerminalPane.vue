@@ -34,10 +34,66 @@ let detach: (() => void) | null = null
 let termReady = false
 let pendingFrame = 0
 
+// One xterm row, in CSS pixels. It is a fraction (12px * 1.25 line height is
+// not a whole pixel), so it has to be measured rather than assumed.
+let stripRowHeight = 0
+// The host's vertical padding: box-sizing is border-box, so the content box is
+// only exactly one row tall once this is added back to the height.
+let stripPadding = 0
+
+function measureStripRow(): void {
+  const row = term?.element?.querySelector<HTMLElement>('.xterm-rows > div')
+  const measured = row?.getBoundingClientRect().height ?? 0
+  if (measured > 0) stripRowHeight = measured
+  if (host.value) {
+    const style = getComputedStyle(host.value)
+    stripPadding = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom)
+  }
+}
+
+// The last styles written by applyStripViewport. It runs on every cursor move
+// (onCursorMove), so unchanged values must not be rewritten.
+let stripHeight = ''
+let stripTransform = ''
+
+/**
+ * The collapsed strip is one visible row, but the terminal keeps two rows so the
+ * panel -> shell `cd` sync's own erase has a row to work with (see refit). The
+ * row that must be visible is the one the cursor is on: the strip is the command
+ * line, so it shows the line being typed, not whichever row happens to sit at
+ * the top of the two-row buffer. The host is therefore sized to exactly one row
+ * and the terminal is shifted up so the cursor's row lands inside it — with the
+ * terminal left alone the strip showed the row above the cursor (the last output
+ * line after `ls`) instead of the prompt.
+ */
+function applyStripViewport(): void {
+  const hostEl = host.value
+  const xtermEl = term?.element
+  if (!hostEl || !xtermEl) return
+
+  if (props.expanded) {
+    if (stripHeight !== '') hostEl.style.height = stripHeight = ''
+    if (stripTransform !== '') xtermEl.style.transform = stripTransform = ''
+    return
+  }
+
+  if (stripRowHeight === 0) measureStripRow()
+  if (stripRowHeight === 0) return
+
+  const cursorRow = term?.buffer.active.cursorY ?? 0
+  const nextHeight = `${stripRowHeight + stripPadding}px`
+  const nextTransform = cursorRow > 0 ? `translateY(${-cursorRow * stripRowHeight}px)` : ''
+  if (nextHeight !== stripHeight) hostEl.style.height = stripHeight = nextHeight
+  if (nextTransform !== stripTransform) xtermEl.style.transform = stripTransform = nextTransform
+}
+
 function refit(): void {
   if (!term || !fitAddon) return
   const element = host.value
   if (!element || element.clientWidth === 0 || element.clientHeight === 0) return
+  // fit reads the host's height, so the collapsed strip's one-row sizing has to
+  // be released before an expanded terminal can fill the window.
+  if (props.expanded) element.style.height = ''
   fitAddon.fit()
   // The panel -> shell `cd` sync erases its own echo with `printf
   // '\033[1A\033[2K'`, which walks back one row and clears it. That needs a
@@ -45,12 +101,13 @@ function refit(): void {
   // the echoed `cd` leaves the viewport for the scrollback before the `printf`
   // runs, and Ctrl+O then shows a transcript of syncs the user never typed.
   // Two rows keep the sync on screen for its own erase to clear, so the terminal
-  // is clamped to two rows here. The collapsed strip shows only the first of
-  // them (basis-7, so the spare row is clipped away) — it is geometry the erase
-  // needs, not a second visible line.
+  // is clamped to two rows here; the collapsed strip clips the spare row away
+  // (applyStripViewport) rather than showing it.
   const rows = Math.max(term.rows, 2)
   if (rows !== term.rows) term.resize(term.cols, rows)
   props.shell.resize(term.cols, rows)
+  measureStripRow()
+  applyStripViewport()
 }
 
 function scheduleRefit(): void {
@@ -108,6 +165,10 @@ function startTerminal(): void {
     props.shell.noteInput(data)
     props.shell.write(data)
   })
+
+  // Output scrolls the two-row buffer, and the sync's erase moves the cursor
+  // back up a row; either way the strip has to follow the cursor's row.
+  term.onCursorMove(() => applyStripViewport())
 
   term.attachCustomKeyEventHandler((event) => {
     const isTerminalToggle =
@@ -212,6 +273,10 @@ defineExpose({ focusTerminal })
       </button>
     </div>
 
-    <div ref="host" class="min-h-0 flex-1 overflow-hidden px-3 py-1"></div>
+    <div
+      ref="host"
+      class="min-h-0 overflow-hidden px-3 py-1"
+      :class="expanded ? 'flex-1' : 'flex-none'"
+    ></div>
   </section>
 </template>
