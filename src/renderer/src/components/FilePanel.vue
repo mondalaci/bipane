@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ComponentPublicInstance } from 'vue'
 import type { PaneController, ScrollAlign } from '@renderer/composables/useDirectory'
-import { formatDate, formatSize } from '@renderer/lib/format'
+import { formatDate, formatMode, formatSize } from '@renderer/lib/format'
 import FileIcon from '@renderer/components/FileIcon.vue'
 
 const ROW_HEIGHT = 22
@@ -16,6 +16,10 @@ const emit = defineEmits<{
 
 const listEl = ref<HTMLUListElement | null>(null)
 const searchInput = ref<HTMLInputElement | null>(null)
+
+// The footer mirrors the status of this pane's own cursor and marks.
+const entry = computed(() => props.controller.current())
+const selectedCount = computed(() => props.controller.selectedCount())
 
 // Kept out of the <ul> on purpose: the row list must contain exactly the
 // entries, or index-based scrolling and the cursor watch would be off by one.
@@ -347,9 +351,20 @@ function onRenameBlur(): void {
       class="flex h-6 shrink-0 items-center justify-between border-t border-border-subtle bg-surface px-3 text-ui-sm text-fg-dim"
     >
       <span class="tabular-nums">{{ controller.state.itemCount }} items</span>
-      <span v-if="controller.state.parent" class="truncate font-mono" :title="controller.state.parent">
-        {{ controller.state.parent }}
-      </span>
+
+      <div class="flex shrink-0 items-center gap-3">
+        <template v-if="entry && !entry.isParent">
+          <span class="hidden tabular-nums lg:inline">{{ formatMode(entry.mode) }}</span>
+          <span class="tabular-nums">
+            {{ entry.kind === 'directory' ? 'dir' : formatSize(entry.size) }}
+          </span>
+          <span class="hidden tabular-nums lg:inline">{{ formatDate(entry.mtimeMs) }}</span>
+        </template>
+
+        <span v-if="selectedCount > 0" class="tabular-nums text-selected">
+          {{ selectedCount }} selected
+        </span>
+      </div>
     </div>
   </section>
 </template>

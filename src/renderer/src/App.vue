@@ -3,7 +3,6 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch 
 import FilePanel from '@renderer/components/FilePanel.vue'
 import ConfirmTransfer from '@renderer/components/ConfirmTransfer.vue'
 import ConfirmDelete from '@renderer/components/ConfirmDelete.vue'
-import StatusBar from '@renderer/components/StatusBar.vue'
 import TerminalPane from '@renderer/components/TerminalPane.vue'
 import TitleBar from '@renderer/components/TitleBar.vue'
 import FileViewer from '@renderer/components/FileViewer.vue'
@@ -571,8 +570,8 @@ onBeforeUnmount(() => {
     <TitleBar :terminal-open="terminalExpanded" @toggle-terminal="toggleTerminal" />
 
     <!-- The wrapper is the positioning context for the viewer overlay, which
-         covers the panes and the terminal but leaves the title and status bars
-         visible. `grow` keeps the panes' terminal-driven flex behaviour. -->
+         covers the panes and the terminal but leaves the title bar visible.
+         `grow` keeps the panes' terminal-driven flex behaviour. -->
     <div class="relative flex min-h-0 grow flex-col">
       <main
         ref="panelHost"
@@ -612,8 +611,6 @@ onBeforeUnmount(() => {
         @close="closeViewer"
       />
     </div>
-
-    <StatusBar :pane="activePane" :active-side="activeSide" :terminal-open="terminalExpanded" />
 
     <ConfirmTransfer
       v-if="copyJob"
