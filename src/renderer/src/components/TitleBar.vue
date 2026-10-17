@@ -41,7 +41,7 @@ function onDoubleClick(event: MouseEvent): void {
 
 <template>
   <header
-    class="drag-region flex h-8 shrink-0 items-center border-b border-border bg-surface"
+    class="drag-region flex h-8 shrink-0 items-center border-b border-border bg-surface pr-1.5"
     @dblclick="onDoubleClick"
   >
     <div class="flex shrink-0 items-center gap-2 pl-3">
@@ -89,7 +89,7 @@ function onDoubleClick(event: MouseEvent): void {
 
     <div class="min-w-0 flex-1"></div>
 
-    <div class="no-drag flex h-full shrink-0 items-stretch">
+    <div class="no-drag flex h-full shrink-0 items-stretch gap-1.5">
       <button
         type="button"
         class="flex w-11 items-center justify-center text-fg-dim transition-colors hover:bg-hover hover:text-fg"
