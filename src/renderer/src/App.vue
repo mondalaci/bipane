@@ -108,6 +108,45 @@ function focusPanes(): void {
   terminalRef.value?.focusTerminal()
 }
 
+/**
+ * Whether the element holding focus belongs to nothing the app cares about: the
+ * document body, which is where a click on non-focusable chrome (the title bar,
+ * a pane border, a footer strip) leaves it, or the panel host once the terminal
+ * is collapsed and the command line is the default target again.
+ */
+function focusIsUnclaimed(): boolean {
+  const active = document.activeElement
+  if (!active || active === document.body) return true
+  return active === panelHost.value && !terminalExpanded.value
+}
+
+/**
+ * The command line is the app's default focus target, but DOM focus can fall to
+ * an unclaimed element and stay there: clicking non-interactive chrome moves it
+ * to `<body>`, and when the window manager reactivates the window with a click
+ * it consumed for activation, nothing inside the app ever learns it happened.
+ * The command line then renders its hollow, unfocused cursor and typing has
+ * nowhere to go — the state a user can only escape by toggling the terminal,
+ * which re-runs the focus path.
+ *
+ * Re-assert the focus model whenever focus lands on an unclaimed element.
+ * Anything that legitimately owns the keyboard — the terminal, the search box,
+ * a rename, the viewer, a dialog — is the active element, so it is never
+ * disturbed, and the viewer and dialogs are excluded outright.
+ */
+function restoreFocus(): void {
+  if (viewerPath.value !== null) return
+  if (deleteTargets.value.length > 0 || copyJob.value !== null || moveJob.value !== null) return
+  if (!focusIsUnclaimed()) return
+  focusPanes()
+}
+
+// A focus change is one synchronous burst, so the check is deferred a macrotask:
+// by then a real new target has taken focus and only a genuine drop is restored.
+function onFocusDrop(): void {
+  window.setTimeout(restoreFocus, 0)
+}
+
 function toggleTerminal(): void {
   if (terminalExpanded.value) {
     collapseTerminal()
@@ -618,6 +657,12 @@ function onKeydown(event: KeyboardEvent): void {
  */
 window.addEventListener('keydown', onKeydown, { capture: true })
 
+// Focus can be lost to an element that owns nothing — a click on chrome, or the
+// window manager's activation click — so the command line is re-asserted on both
+// a window focus and any focus change that lands on an unclaimed element.
+window.addEventListener('focus', restoreFocus)
+document.addEventListener('focusout', onFocusDrop)
+
 onMounted(() => {
   void left.value.init()
   void right.value.init()
@@ -626,6 +671,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   if (commandSettleTimer !== null) window.clearTimeout(commandSettleTimer)
   window.removeEventListener('keydown', onKeydown, { capture: true })
+  window.removeEventListener('focus', restoreFocus)
+  document.removeEventListener('focusout', onFocusDrop)
 })
 </script>
 
