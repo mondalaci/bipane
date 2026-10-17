@@ -273,7 +273,12 @@ onBeforeUnmount(() => {
   <div class="flex h-full flex-col overflow-hidden bg-bg text-fg select-none">
     <TitleBar :terminal-open="terminalExpanded" @toggle-terminal="toggleTerminal" />
 
-    <main ref="panelHost" tabindex="-1" class="flex min-h-0 flex-1 outline-none">
+    <main
+      v-show="!terminalExpanded"
+      ref="panelHost"
+      tabindex="-1"
+      class="flex min-h-0 flex-1 outline-none"
+    >
       <FilePanel
         :controller="left"
         :active="activeSide === 'left'"
