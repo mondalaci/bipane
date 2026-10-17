@@ -4,6 +4,7 @@ import type {
   CopyOutcome,
   DeleteOutcome,
   DirListing,
+  FileContent,
   FsChangeEvent,
   MoveOutcome,
   PtyDataEvent,
@@ -16,6 +17,9 @@ const api: BipaneApi = {
   fs: {
     home: () => ipcRenderer.invoke('fs:home'),
     list: (dir: string): Promise<Result<DirListing>> => ipcRenderer.invoke('fs:list', dir),
+    read: (target: string): Promise<Result<FileContent>> => ipcRenderer.invoke('fs:read', target),
+    write: (target: string, text: string): Promise<Result<string>> =>
+      ipcRenderer.invoke('fs:write', target, text),
     open: (target: string) => ipcRenderer.invoke('fs:open', target),
     reveal: (target: string) => ipcRenderer.invoke('fs:reveal', target),
     rename: (source: string, target: string): Promise<Result<string>> =>

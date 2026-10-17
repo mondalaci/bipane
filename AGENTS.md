@@ -21,7 +21,10 @@ There is no linter or test runner configured yet.
 
 ```
 src/main/index.ts        window lifecycle, single-instance lock
-src/main/ipc/fs.ts       IPC: fs:home, fs:list, fs:open, fs:reveal
+src/main/ipc/fs.ts       IPC: fs:home, fs:list, fs:read, fs:write, fs:open,
+                         fs:reveal
+                         (fs:read/fs:write serve the viewer: regular text files
+                         only, binary and oversized reads refused/truncated)
 src/main/ipc/watch.ts    IPC: fs:watch, fs:unwatch; pushes fs:changed when a
                          watched directory's contents change (fs.watch = inotify)
 src/main/ipc/pty.ts      IPC: pty:create/write/resize/kill/state, pushes pty:data, pty:exit
@@ -35,15 +38,20 @@ src/renderer/src/components/FilePanel.vue    one pane: path bar, list, footer
 src/renderer/src/components/TerminalPane.vue xterm over the shared shell: the
                                              collapsed command line and, when
                                              expanded, the full terminal
+src/renderer/src/components/FileViewer.vue   Monaco overlay: read-only (F3) or
+                                             editable with Ctrl+S (F4)
 src/renderer/src/composables/useShell.ts     the single shared shell session
 src/renderer/src/composables/useDirectory.ts per-pane navigation state + actions
 src/renderer/src/lib/format.ts               size/date/permission formatting
+src/renderer/src/lib/monaco.ts               lazy monaco import + worker wiring
 src/renderer/src/lib/fileIcon.ts             per-entry icon: name/extension -> 24x24 svg
                                              (FILENAME_ICONS, EXTENSION_ICONS, fallback text)
 ```
 
 Keys: `Tab` switches panes, arrows/`Home`/`End`/`PgUp`/`PgDn` move the cursor,
-`Enter` descends or opens, `Insert` marks the current entry and moves down,
+`Enter` descends or opens with the system default app, `F3` opens a regular file
+read-only in the Monaco viewer, `F4` opens it for editing with Ctrl+S to save (a
+directory still descends on `F3`), `Insert` marks the current entry and moves down,
 right-click marks a row and dragging the held button paints that mark across
 rows, `Ctrl+O` toggles the terminal, `Ctrl+R` re-lists the active pane,
 `Ctrl+U` swaps the two panels (each keeps its cursor, marks and filter),
@@ -145,6 +153,34 @@ it edits the line, and reaching the parent is the `..` row's job.
   spawn and take the *new* shell down with it, since the session id is a
   constant. For the same reason `attachTerminal` does not drain the output
   buffer: a view that attaches later replays the session so far.
+- **The viewer is a modal overlay over the panes and terminal.** `App.vue`
+  renders `FileViewer` absolutely inside a `relative` wrapper that holds `main`
+  and `TerminalPane`, so the title and status bars stay visible. While a file is
+  open the window capture handler consumes only `Escape` and returns for
+  everything else, so Monaco — not the panes or the shell — owns the keyboard.
+  Escape closing is *delegated* to the viewer (`confirmClose()` via a template
+  ref), because only it knows whether an edit (F4) is dirty; a dirty buffer
+  prompts before anything is discarded. `Escape` is claimed at the window level
+  rather than as a Monaco command so the error path (a binary or unreadable
+  file) has no editor yet still closes. Ctrl+S is a Monaco command, which the
+  capture handler deliberately lets through untouched. A *save* failure sets
+  `saveError` (a header strip) rather than `error`, because `error` swaps the
+  editor's container out of the DOM — using it would unmount the very buffer the
+  user is still editing. A file the read had to truncate is refused for editing
+  outright: saving it back would write only the first 8 MiB and silently destroy
+  the tail.
+- **Monaco is imported only when the viewer first opens**, and its workers are
+  answered by `MonacoEnvironment.getWorker` with Vite `?worker` imports in
+  `lib/monaco.ts`. Monaco 0.57 otherwise builds its workers from
+  `new URL('...worker.js', import.meta.url)` paths inside `node_modules`, which
+  do not survive the build; installing `getWorker` before the first
+  `editor.create` is what makes the base and language workers load (verified
+  under both dev `http://` and the `file://` production build). F3 stays closed
+  to anything that is not a regular file — opening a FIFO would block — and
+  main's `fs:read` re-checks that with `O_RDONLY | O_NONBLOCK` plus a NUL-byte
+  binary test and an 8 MiB ceiling, so the renderer only ever receives text an
+  editor can show (or a `truncated` flag), and `fs:write` (the save) refuses a
+  target that exists but is not a regular file or symlink.
 - **Focus model:** the command line holds focus whenever the terminal does not,
   so `focusPanes()` *focuses the command line* rather than blurring. The search
   box and the terminal are the other two focus targets. Navigation keys are

@@ -40,6 +40,19 @@ export interface FsChangeEvent {
   path: string
 }
 
+/**
+ * A regular file read for the viewer. `text` is the file decoded as UTF-8, and
+ * `truncated` marks one larger than the viewer's read limit whose tail was
+ * dropped rather than loaded. Main refuses non-regular files (directories,
+ * sockets, FIFOs, devices) and files that look binary, so a successful read is
+ * always something the editor can display.
+ */
+export interface FileContent {
+  path: string
+  text: string
+  truncated: boolean
+}
+
 export type Result<T> = { ok: true; data: T } | { ok: false; error: FsError }
 
 export interface DeleteFailure {

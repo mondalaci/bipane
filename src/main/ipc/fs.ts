@@ -1,4 +1,4 @@
-import { promises as fs, type Stats } from 'node:fs'
+import { constants as fsConstants, promises as fs, type Stats } from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { ipcMain, shell } from 'electron'
@@ -10,6 +10,7 @@ import type {
   DirEntry,
   DirListing,
   EntryKind,
+  FileContent,
   MoveFailure,
   MoveOutcome,
   Result
@@ -82,6 +83,72 @@ export async function listDirectory(input: string): Promise<DirListing> {
   return { path: dir, parent: parent === dir ? null : parent, entries }
 }
 
+/**
+ * The viewer decodes what it reads as UTF-8 text, so a NUL byte in the head of
+ * the file is the cheapest reliable signal that it is not text — decoding it
+ * anyway would flood the editor with replacement characters.
+ */
+function looksBinary(buffer: Buffer): boolean {
+  const sample = Math.min(buffer.length, 8000)
+  for (let i = 0; i < sample; i += 1) {
+    if (buffer[i] === 0) return true
+  }
+  return false
+}
+
+/**
+ * Ceiling on what the viewer will load. A model larger than this is read only
+ * up to the limit and flagged `truncated` rather than pulling gigabytes into
+ * the renderer.
+ */
+const MAX_VIEW_BYTES = 8 * 1024 * 1024
+
+/**
+ * Read a regular file for the viewer. O_NONBLOCK matters: without it the `open`
+ * of a FIFO waits for a writer and the handler would never answer, so the kind
+ * check below could not run. Directories, sockets, FIFOs and devices are
+ * refused here, which is why the renderer only offers regular files.
+ */
+async function readFileForViewer(input: string): Promise<FileContent> {
+  const target = path.resolve(input)
+  const handle = await fs.open(target, fsConstants.O_RDONLY | fsConstants.O_NONBLOCK)
+
+  try {
+    const stats = await handle.stat()
+    if (!stats.isFile()) {
+      throw Object.assign(new Error(`"${path.basename(target)}" is not a regular file`), {
+        code: 'EINVAL'
+      })
+    }
+
+    const length = Math.min(stats.size, MAX_VIEW_BYTES)
+    const buffer = Buffer.allocUnsafe(length)
+    // A single read of a regular file can return short; keep going until the
+    // buffer is full or the file ends.
+    let filled = 0
+    while (filled < length) {
+      const { bytesRead } = await handle.read(buffer, filled, length - filled, filled)
+      if (bytesRead === 0) break
+      filled += bytesRead
+    }
+
+    const content = buffer.subarray(0, filled)
+    if (looksBinary(content)) {
+      throw Object.assign(new Error(`"${path.basename(target)}" looks binary`), {
+        code: 'EBINARY'
+      })
+    }
+
+    return {
+      path: target,
+      text: content.toString('utf8'),
+      truncated: stats.size > length
+    }
+  } finally {
+    await handle.close()
+  }
+}
+
 export function registerFsHandlers(): void {
   ipcMain.handle('fs:home', () => os.homedir())
 
@@ -96,6 +163,56 @@ export function registerFsHandlers(): void {
   ipcMain.handle('fs:open', async (_event, target: string) => {
     return shell.openPath(target)
   })
+
+  ipcMain.handle('fs:read', async (_event, target: string): Promise<Result<FileContent>> => {
+    if (typeof target !== 'string' || target.length === 0) {
+      return { ok: false, error: { code: 'EINVAL', message: 'No file to read' } }
+    }
+    try {
+      return { ok: true, data: await readFileForViewer(target) }
+    } catch (error) {
+      return { ok: false, error: toFsError(error) }
+    }
+  })
+
+  ipcMain.handle(
+    'fs:write',
+    async (_event, target: string, text: string): Promise<Result<string>> => {
+      if (typeof target !== 'string' || target.length === 0) {
+        return { ok: false, error: { code: 'EINVAL', message: 'No file to write' } }
+      }
+      if (typeof text !== 'string') {
+        return { ok: false, error: { code: 'EINVAL', message: 'Refusing to write non-text content' } }
+      }
+
+      const resolved = path.resolve(target)
+      try {
+        // Only an existing regular file (or a symlink to one) is a save target.
+        // A directory, socket or device would either fail oddly or write into
+        // something the editor never showed. A path that no longer exists is
+        // allowed: re-saving a deleted file recreates it, as an editor should.
+        try {
+          const stats = await fs.lstat(resolved)
+          if (!stats.isFile() && !stats.isSymbolicLink()) {
+            return {
+              ok: false,
+              error: {
+                code: 'EINVAL',
+                message: `"${path.basename(resolved)}" is not a regular file`
+              }
+            }
+          }
+        } catch {
+          // Missing target — a fresh save recreates it.
+        }
+
+        await fs.writeFile(resolved, text, 'utf8')
+        return { ok: true, data: resolved }
+      } catch (error) {
+        return { ok: false, error: toFsError(error) }
+      }
+    }
+  )
 
   ipcMain.handle('fs:reveal', (_event, target: string) => {
     shell.showItemInFolder(target)

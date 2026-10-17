@@ -6,6 +6,7 @@ import ConfirmDelete from '@renderer/components/ConfirmDelete.vue'
 import StatusBar from '@renderer/components/StatusBar.vue'
 import TerminalPane from '@renderer/components/TerminalPane.vue'
 import TitleBar from '@renderer/components/TitleBar.vue'
+import FileViewer from '@renderer/components/FileViewer.vue'
 import { useDirectory, type PaneController, type PaneEntry } from '@renderer/composables/useDirectory'
 import { useShell } from '@renderer/composables/useShell'
 import type { PanelSide } from '@shared/types'
@@ -32,6 +33,16 @@ const terminalExpanded = ref(false)
 const terminalFocused = ref(false)
 const panelHost = ref<HTMLElement | null>(null)
 const terminalRef = ref<InstanceType<typeof TerminalPane> | null>(null)
+
+/**
+ * The file shown in the Monaco viewer, or null when it is closed. The viewer is
+ * an overlay over the panes and terminal, so a non-null value is what "the
+ * viewer is open" means — exactly like the staged dialogs below. `viewerMode`
+ * is whether it was opened read-only (F3) or for editing (F4).
+ */
+const viewerPath = ref<string | null>(null)
+const viewerMode = ref<'view' | 'edit'>('view')
+const viewerRef = ref<InstanceType<typeof FileViewer> | null>(null)
 
 /**
  * F8 never deletes on its own: it stages the pane's targets here and the
@@ -115,6 +126,27 @@ function toggleSearch(): void {
   const pane = activePane.value
   if (pane.state.searchActive) pane.closeSearch()
   else pane.openSearch()
+}
+
+/**
+ * F3 opens a regular file read-only in the Monaco viewer, F4 opens it for
+ * editing. Directories keep their previous F3 meaning (descend), and anything
+ * that is not a regular file — a socket, FIFO or device — is left alone rather
+ * than fed to a text editor.
+ */
+function openViewer(target: string, mode: 'view' | 'edit'): void {
+  viewerMode.value = mode
+  viewerPath.value = target
+}
+
+/**
+ * Closing is deferred to the viewer so an edit with unsaved changes can ask
+ * first; the viewer is the only thing that knows whether the buffer is dirty.
+ */
+function closeViewer(): void {
+  if (viewerRef.value && !viewerRef.value.confirmClose()) return
+  viewerPath.value = null
+  focusPanes()
 }
 
 function requestDelete(): void {
@@ -403,7 +435,15 @@ function handlePaneKey(event: KeyboardEvent): void {
     case 'F3': {
       consume(event)
       const entry = pane.current()
-      if (entry && (entry.isParent || entry.kind === 'directory')) void pane.activate()
+      if (!entry) break
+      if (entry.isParent || entry.kind === 'directory') void pane.activate()
+      else if (entry.kind === 'file') openViewer(entry.path, 'view')
+      break
+    }
+    case 'F4': {
+      consume(event)
+      const entry = pane.current()
+      if (entry && !entry.isParent && entry.kind === 'file') openViewer(entry.path, 'edit')
       break
     }
     case 'F5':
@@ -432,6 +472,17 @@ function handlePaneKey(event: KeyboardEvent): void {
 }
 
 function onKeydown(event: KeyboardEvent): void {
+  // The viewer owns the keyboard while it is open — Monaco handles Ctrl+F and
+  // the rest itself — so nothing here consumes keys except Escape, which closes
+  // it. This also covers the error state, where no editor was created to close.
+  if (viewerPath.value !== null) {
+    if (event.key === 'Escape') {
+      consume(event)
+      closeViewer()
+    }
+    return
+  }
+
   // The dialogs are modal. Escape cancels; every other key is left to the
   // dialog (its default button is focused, arrows move between the buttons,
   // Enter activates the focused one) instead of reaching the panes or shell.
@@ -519,34 +570,48 @@ onBeforeUnmount(() => {
   <div class="flex h-full flex-col overflow-hidden bg-bg text-fg select-none">
     <TitleBar :terminal-open="terminalExpanded" @toggle-terminal="toggleTerminal" />
 
-    <main
-      ref="panelHost"
-      tabindex="-1"
-      class="flex min-h-0 shrink basis-0 overflow-hidden outline-none transition-[flex-grow] duration-150 ease-out"
-      :class="terminalExpanded ? 'grow-0' : 'grow'"
-    >
-      <FilePanel
-        :controller="left"
-        :active="activeSide === 'left'"
-        @select="setActive('left')"
-        @pointer-down="focusPanes"
-      />
-      <div class="w-px shrink-0 bg-border"></div>
-      <FilePanel
-        :controller="right"
-        :active="activeSide === 'right'"
-        @select="setActive('right')"
-        @pointer-down="focusPanes"
-      />
-    </main>
+    <!-- The wrapper is the positioning context for the viewer overlay, which
+         covers the panes and the terminal but leaves the title and status bars
+         visible. `grow` keeps the panes' terminal-driven flex behaviour. -->
+    <div class="relative flex min-h-0 grow flex-col">
+      <main
+        ref="panelHost"
+        tabindex="-1"
+        class="flex min-h-0 shrink basis-0 overflow-hidden outline-none transition-[flex-grow] duration-150 ease-out"
+        :class="terminalExpanded ? 'grow-0' : 'grow'"
+      >
+        <FilePanel
+          :controller="left"
+          :active="activeSide === 'left'"
+          @select="setActive('left')"
+          @pointer-down="focusPanes"
+        />
+        <div class="w-px shrink-0 bg-border"></div>
+        <FilePanel
+          :controller="right"
+          :active="activeSide === 'right'"
+          @select="setActive('right')"
+          @pointer-down="focusPanes"
+        />
+      </main>
 
-    <TerminalPane
-      ref="terminalRef"
-      :expanded="terminalExpanded"
-      :cwd="activePanePath"
-      @focused-change="terminalFocused = $event"
-      @collapse="collapseTerminal"
-    />
+      <TerminalPane
+        ref="terminalRef"
+        :expanded="terminalExpanded"
+        :cwd="activePanePath"
+        @focused-change="terminalFocused = $event"
+        @collapse="collapseTerminal"
+      />
+
+      <FileViewer
+        v-if="viewerPath !== null"
+        ref="viewerRef"
+        :key="`${viewerMode}:${viewerPath}`"
+        :path="viewerPath"
+        :mode="viewerMode"
+        @close="closeViewer"
+      />
+    </div>
 
     <StatusBar :pane="activePane" :active-side="activeSide" :terminal-open="terminalExpanded" />
 

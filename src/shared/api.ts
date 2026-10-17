@@ -2,6 +2,7 @@ import type {
   CopyOutcome,
   DeleteOutcome,
   DirListing,
+  FileContent,
   FsChangeEvent,
   MoveOutcome,
   PtyDataEvent,
@@ -14,6 +15,16 @@ import type {
 export interface BipaneFsApi {
   home(): Promise<string>
   list(dir: string): Promise<Result<DirListing>>
+  /**
+   * Read a regular text file for the viewer. Non-regular files and binary
+   * content come back as an error rather than a lossy decode.
+   */
+  read(target: string): Promise<Result<FileContent>>
+  /**
+   * Overwrite a regular text file with edited content (the editor's save).
+   * Returns the resolved path that was written.
+   */
+  write(target: string, text: string): Promise<Result<string>>
   open(target: string): Promise<string>
   reveal(target: string): Promise<void>
   rename(source: string, target: string): Promise<Result<string>>
