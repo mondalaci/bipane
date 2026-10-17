@@ -168,8 +168,8 @@ defineExpose({ focusTerminal })
 <template>
   <section
     ref="root"
-    class="flex flex-col overflow-hidden border-t border-border bg-bg"
-    :class="expanded ? 'min-h-0 flex-1' : 'h-7 shrink-0'"
+    class="flex min-h-0 flex-col overflow-hidden border-t border-border bg-bg transition-[flex-grow,flex-basis] duration-150 ease-out"
+    :class="expanded ? 'grow basis-0' : 'grow-0 shrink-0 basis-7'"
     @focusin="emit('focused-change', true)"
     @focusout="onFocusOut"
   >

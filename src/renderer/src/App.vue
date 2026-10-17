@@ -274,10 +274,10 @@ onBeforeUnmount(() => {
     <TitleBar :terminal-open="terminalExpanded" @toggle-terminal="toggleTerminal" />
 
     <main
-      v-show="!terminalExpanded"
       ref="panelHost"
       tabindex="-1"
-      class="flex min-h-0 flex-1 outline-none"
+      class="flex min-h-0 shrink basis-0 overflow-hidden outline-none transition-[flex-grow] duration-150 ease-out"
+      :class="terminalExpanded ? 'grow-0' : 'grow'"
     >
       <FilePanel
         :controller="left"
