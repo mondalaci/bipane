@@ -43,7 +43,7 @@ Keys: `Tab` switches panes, arrows/`Home`/`End`/`PgUp`/`PgDn` move the cursor,
 incremental search. `Backspace` never navigates: it belongs to the shell's line
 editor (or the search box), so the `..` row is the way up.
 
-The bottom strip is the shell itself: the same xterm, collapsed to three rows,
+The bottom strip is the shell itself: the same xterm, collapsed to one row,
 so the prompt, font and echo are the shell's own rather than a look-alike
 widget. `Ctrl+O` expands it into the full terminal, which then owns the
 keyboard outright. While it is collapsed, printable characters go to the shell
