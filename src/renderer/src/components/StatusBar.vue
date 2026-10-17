@@ -52,6 +52,8 @@ const selectedCount = computed(() => props.pane.selectedCount())
         <span>find</span>
         <kbd class="rounded border border-border bg-bg-alt px-1 font-mono text-2xs">Ctrl+O</kbd>
         <span>terminal</span>
+        <kbd class="rounded border border-border bg-bg-alt px-1 font-mono text-2xs">Ctrl+R</kbd>
+        <span>refresh</span>
       </span>
     </div>
   </footer>

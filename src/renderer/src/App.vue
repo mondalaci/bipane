@@ -301,6 +301,20 @@ function onKeydown(event: KeyboardEvent): void {
     return
   }
 
+  const isRefresh =
+    event.ctrlKey &&
+    !event.shiftKey &&
+    !event.altKey &&
+    !event.metaKey &&
+    event.key.toLowerCase() === 'r'
+
+  if (isRefresh) {
+    event.preventDefault()
+    event.stopPropagation()
+    void activePane.value.refresh()
+    return
+  }
+
   // Expanded and focused means it is a real terminal: it owns the keyboard.
   if (terminalExpanded.value && terminalFocused.value) return
 

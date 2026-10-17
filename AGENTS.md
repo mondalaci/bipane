@@ -41,7 +41,8 @@ src/renderer/src/lib/format.ts               size/date/permission formatting
 Keys: `Tab` switches panes, arrows/`Home`/`End`/`PgUp`/`PgDn` move the cursor,
 `Enter` descends or opens, `Insert` marks the current entry and moves down,
 right-click marks a row and dragging the held button paints that mark across
-rows, `Ctrl+O` toggles the terminal, `Alt+S` starts an incremental search.
+rows, `Ctrl+O` toggles the terminal, `Ctrl+R` re-lists the active pane,
+`Alt+S` starts an incremental search.
 `Backspace` never navigates: it belongs to the shell's line
 editor (or the search box), so the `..` row is the way up.
 
