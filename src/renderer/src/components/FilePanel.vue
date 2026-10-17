@@ -47,33 +47,54 @@ const previewVisible = computed(
 )
 
 /**
+ * How long the cursor must hold still before its image is read. A held arrow
+ * key moves through rows far faster than an image can be read, and a large one
+ * is decoded synchronously in main: reading every row a key repeat passes over
+ * keeps main busy, which delays the very input events that drive the cursor and
+ * reads as choppy movement. Re-armed on every cursor change, so a scrolling
+ * burst asks for nothing until it stops.
+ */
+const PREVIEW_SETTLE_MS = 150
+
+/**
  * Read the image the cursor sits on. Keyed by path *and* size/mtime so an
  * external rewrite of the same path reloads, and guarded by a token so a slow
  * read for a row the user has already left cannot replace the newer preview.
  */
 let previewToken = 0
+let previewTimer: number | null = null
+
+function cancelPreviewRead(): void {
+  if (previewTimer === null) return
+  window.clearTimeout(previewTimer)
+  previewTimer = null
+}
+
+async function loadPreview(token: number): Promise<void> {
+  const current = imageEntry.value
+  if (!current || token !== previewToken) return
+
+  const result = await window.bipane.fs.readImage(current.path)
+  if (token !== previewToken) return
+  previewPending.value = false
+  preview.value = result.ok ? result.data.dataUrl : null
+}
 
 watch(
   () => {
     const current = imageEntry.value
     return current ? `${current.path}\u0000${current.size}:${current.mtimeMs}` : null
   },
-  async (key) => {
+  (key) => {
+    cancelPreviewRead()
     const token = (previewToken += 1)
     preview.value = null
     previewPending.value = key !== null
     if (key === null) return
-
-    const current = imageEntry.value
-    if (!current) {
-      previewPending.value = false
-      return
-    }
-
-    const result = await window.bipane.fs.readImage(current.path)
-    if (token !== previewToken) return
-    previewPending.value = false
-    preview.value = result.ok ? result.data.dataUrl : null
+    previewTimer = window.setTimeout(() => {
+      previewTimer = null
+      void loadPreview(token)
+    }, PREVIEW_SETTLE_MS)
   }
 )
 
@@ -162,6 +183,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   listObserver?.disconnect()
   listObserver = null
+  cancelPreviewRead()
   window.removeEventListener('mouseup', endPainting)
 })
 

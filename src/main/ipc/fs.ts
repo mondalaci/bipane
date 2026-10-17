@@ -195,8 +195,9 @@ async function readAll(handle: FileHandle, size: number): Promise<Buffer> {
  * if this build cannot read the format. This is what keeps an arbitrarily large
  * source from becoming an arbitrarily large payload: past `RAW_PREVIEW_BYTES`
  * the bar gets the thumbnail, not the original. The decode is synchronous, so
- * it does block main for the length of one image — acceptable for a cursor
- * landing on a row, and the reason the small-file path skips it entirely.
+ * it does block main for the length of one image — which is why the caller
+ * reaches it only for a cursor that has settled (see below), and why the small
+ * file path skips it entirely.
  */
 function downscalePreview(target: string): string | null {
   const image = nativeImage.createFromPath(target)
@@ -213,6 +214,49 @@ function downscalePreview(target: string): string | null {
     height: Math.max(1, Math.round(height * scale))
   })
   return resized.toDataURL()
+}
+
+/**
+ * A preview is worth keeping. Scrolling back and forth over a folder re-visits
+ * the same rows, and without this every return pays the read — or the decode of
+ * a large image — again. The key carries the file's size and mtime, exactly what
+ * the renderer keys its read on, so a rewrite on disk misses the cache as well.
+ * Entries larger than the whole budget are not cached at all, which in practice
+ * means only downscaled previews and small files are.
+ */
+const PREVIEW_CACHE_MAX_BYTES = 24 * 1024 * 1024
+const PREVIEW_CACHE_MAX_ENTRIES = 32
+
+const previewCache = new Map<string, { dataUrl: string; bytes: number }>()
+
+function previewCacheKey(target: string, mtimeMs: number, size: number): string {
+  return `${target}\u0000${mtimeMs}:${size}`
+}
+
+function readPreviewCache(key: string): string | null {
+  const hit = previewCache.get(key)
+  if (!hit) return null
+  // Re-insert so the map's order stays least-recently-used first.
+  previewCache.delete(key)
+  previewCache.set(key, hit)
+  return hit.dataUrl
+}
+
+function writePreviewCache(key: string, dataUrl: string): void {
+  if (dataUrl.length > PREVIEW_CACHE_MAX_BYTES) return
+
+  previewCache.delete(key)
+  previewCache.set(key, { dataUrl, bytes: dataUrl.length })
+
+  let total = 0
+  for (const entry of previewCache.values()) total += entry.bytes
+
+  while (total > PREVIEW_CACHE_MAX_BYTES || previewCache.size > PREVIEW_CACHE_MAX_ENTRIES) {
+    const oldest = previewCache.keys().next()
+    if (oldest.done) break
+    total -= previewCache.get(oldest.value)?.bytes ?? 0
+    previewCache.delete(oldest.value)
+  }
 }
 
 /**
@@ -233,6 +277,7 @@ async function readImageForPreview(input: string): Promise<ImagePreview> {
   }
 
   let size = 0
+  let key: string | null = null
   const handle = await fs.open(target, fsConstants.O_RDONLY | fsConstants.O_NONBLOCK)
 
   try {
@@ -244,16 +289,26 @@ async function readImageForPreview(input: string): Promise<ImagePreview> {
     }
 
     size = stats.size
+    key = previewCacheKey(target, stats.mtimeMs, size)
+
+    const cached = readPreviewCache(key)
+    if (cached !== null) return { dataUrl: cached }
+
     if (size <= RAW_PREVIEW_BYTES) {
       const bytes = await readAll(handle, size)
-      return { dataUrl: `data:${mime};base64,${bytes.toString('base64')}` }
+      const dataUrl = `data:${mime};base64,${bytes.toString('base64')}`
+      writePreviewCache(key, dataUrl)
+      return { dataUrl }
     }
   } finally {
     await handle.close()
   }
 
   const downscaled = downscalePreview(target)
-  if (downscaled !== null) return { dataUrl: downscaled }
+  if (downscaled !== null) {
+    if (key !== null) writePreviewCache(key, downscaled)
+    return { dataUrl: downscaled }
+  }
 
   // The decoder could not read it, so the bytes have to travel after all.
   if (size > LARGE_RAW_PREVIEW_BYTES) {

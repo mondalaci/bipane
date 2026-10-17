@@ -181,13 +181,19 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   file the renderer has no URL for: the extension->MIME map lives in
   `src/shared/image.ts` so both sides agree on what is previewable, main returns
   a `data:` URL (the renderer CSP allows `img-src data:` but not `file:`), and
-  `FilePanel` reserves the space while the read is in flight so arrowing between
-  images does not collapse and re-expand the list on every step. The read is
-  keyed by path *and* size/mtime and token-guarded, so an external rewrite
-  reloads while a slow read for a row the user has left cannot land on the newer
-  one. A mapped extension that still fails to decode (a truncated PNG) clears
-  the preview through the `<img>` error handler and releases the space — the
-  bar shows nothing rather than a broken frame. Size is handled in main rather
+  `FilePanel` reserves the space from the moment the cursor lands on an image,
+  so arrowing between images does not collapse and re-expand the list on every
+  step. The read itself waits for the cursor to settle (`PREVIEW_SETTLE_MS`,
+  re-armed by every cursor change): reading each row a held arrow key passes
+  over stalls the renderer on a large data URL — and main on a large decode —
+  and the input being handled is what pays for it, which is exactly the choppy
+  cursor movement that produces. The read is keyed by path *and* size/mtime and
+  token-guarded, so an external rewrite reloads while a slow read for a row the
+  user has left cannot land on the newer one, and main keeps the last few
+  previews (bounded by bytes and by count) so scrolling back over a folder does
+  not pay for the same image twice. A mapped extension that still fails to decode
+  (a truncated PNG) clears the preview through the `<img>` error handler and
+  releases the space — the bar shows nothing rather than a broken frame. Size is handled in main rather
   than refused: a file up to 16 MiB travels as its own bytes — so an animated
   GIF stays animated, an SVG stays vector and a JPEG keeps its EXIF orientation
   — and anything larger is decoded with `nativeImage` and downscaled to 512px,
