@@ -53,6 +53,17 @@ export interface FileContent {
   truncated: boolean
 }
 
+/**
+ * An image read for a pane's status-bar preview, already encoded as a `data:`
+ * URL so the renderer can drop it straight into an `<img>` without touching the
+ * filesystem itself (the renderer CSP allows `img-src data:`). Main refuses
+ * non-regular files, formats Chromium cannot decode, and files past the preview
+ * ceiling, so a successful read is always something the bar can show.
+ */
+export interface ImagePreview {
+  dataUrl: string
+}
+
 export type Result<T> = { ok: true; data: T } | { ok: false; error: FsError }
 
 export interface DeleteFailure {

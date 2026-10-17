@@ -4,6 +4,7 @@ import type { ComponentPublicInstance } from 'vue'
 import type { PaneController, ScrollAlign } from '@renderer/composables/useDirectory'
 import { formatDate, formatMode, formatSize } from '@renderer/lib/format'
 import FileIcon from '@renderer/components/FileIcon.vue'
+import { imageMimeFor } from '@shared/image'
 
 const ROW_HEIGHT = 22
 
@@ -20,6 +21,67 @@ const searchInput = ref<HTMLInputElement | null>(null)
 // The footer mirrors the status of this pane's own cursor and marks.
 const entry = computed(() => props.controller.current())
 const selectedCount = computed(() => props.controller.selectedCount())
+
+/**
+ * The entry the status bar previews: the cursor row when it is a regular image
+ * file. The shared extension->MIME map is the same one main reads by, so the
+ * bar only asks for something it can actually be given.
+ */
+const imageEntry = computed(() => {
+  const current = entry.value
+  if (!current || current.isParent || current.kind !== 'file') return null
+  return imageMimeFor(current.name) ? current : null
+})
+
+/**
+ * The current image as a `data:` URL, or null while it loads, for a non-image
+ * row, or when main could not produce one (too large, unreadable). `pending`
+ * covers the read in flight, so the bar reserves the preview space the moment
+ * the cursor lands on an image — without it the footer would collapse and
+ * re-expand on every step between images — and gives it back if the read fails.
+ */
+const preview = ref<string | null>(null)
+const previewPending = ref(false)
+const previewVisible = computed(
+  () => imageEntry.value !== null && (previewPending.value || preview.value !== null)
+)
+
+/**
+ * Read the image the cursor sits on. Keyed by path *and* size/mtime so an
+ * external rewrite of the same path reloads, and guarded by a token so a slow
+ * read for a row the user has already left cannot replace the newer preview.
+ */
+let previewToken = 0
+
+watch(
+  () => {
+    const current = imageEntry.value
+    return current ? `${current.path}\u0000${current.size}:${current.mtimeMs}` : null
+  },
+  async (key) => {
+    const token = (previewToken += 1)
+    preview.value = null
+    previewPending.value = key !== null
+    if (key === null) return
+
+    const current = imageEntry.value
+    if (!current) {
+      previewPending.value = false
+      return
+    }
+
+    const result = await window.bipane.fs.readImage(current.path)
+    if (token !== previewToken) return
+    previewPending.value = false
+    preview.value = result.ok ? result.data.dataUrl : null
+  }
+)
+
+function onPreviewError(): void {
+  // A mapped extension can still fail to decode (a truncated or malformed
+  // file), which surfaces here rather than as a rejected read.
+  preview.value = null
+}
 
 // Kept out of the <ul> on purpose: the row list must contain exactly the
 // entries, or index-based scrolling and the cursor watch would be off by one.
@@ -348,9 +410,23 @@ function onRenameBlur(): void {
     </ul>
 
     <div
-      class="flex h-6 shrink-0 items-center justify-between border-t border-border-subtle bg-surface px-3 text-ui-sm text-fg-dim"
+      class="flex shrink-0 items-center justify-between gap-3 border-t border-border-subtle bg-surface px-3 text-ui-sm text-fg-dim"
+      :class="previewVisible ? 'py-1' : 'h-6'"
     >
-      <span class="tabular-nums">{{ controller.state.itemCount }} items</span>
+      <div class="flex min-w-0 items-center gap-3">
+        <div v-if="previewVisible" class="flex h-16 shrink-0 items-center">
+          <img
+            v-if="preview"
+            :src="preview"
+            alt=""
+            draggable="false"
+            class="h-16 w-auto max-w-40 rounded border border-border-subtle object-contain"
+            @error="onPreviewError"
+          />
+        </div>
+
+        <span class="shrink-0 tabular-nums">{{ controller.state.itemCount }} items</span>
+      </div>
 
       <div class="flex shrink-0 items-center gap-3">
         <template v-if="entry && !entry.isParent">

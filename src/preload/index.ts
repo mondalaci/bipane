@@ -6,6 +6,7 @@ import type {
   DirListing,
   FileContent,
   FsChangeEvent,
+  ImagePreview,
   MoveOutcome,
   PtyDataEvent,
   PtyExitEvent,
@@ -18,6 +19,8 @@ const api: BipaneApi = {
     home: () => ipcRenderer.invoke('fs:home'),
     list: (dir: string): Promise<Result<DirListing>> => ipcRenderer.invoke('fs:list', dir),
     read: (target: string): Promise<Result<FileContent>> => ipcRenderer.invoke('fs:read', target),
+    readImage: (target: string): Promise<Result<ImagePreview>> =>
+      ipcRenderer.invoke('fs:read-image', target),
     write: (target: string, text: string): Promise<Result<string>> =>
       ipcRenderer.invoke('fs:write', target, text),
     open: (target: string) => ipcRenderer.invoke('fs:open', target),

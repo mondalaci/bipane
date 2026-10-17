@@ -1,7 +1,9 @@
 import { constants as fsConstants, promises as fs, type Stats } from 'node:fs'
+import type { FileHandle } from 'node:fs/promises'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { ipcMain, shell } from 'electron'
+import { ipcMain, nativeImage, shell } from 'electron'
+import { imageMimeFor } from '@shared/image'
 import type {
   CopyFailure,
   CopyOutcome,
@@ -11,6 +13,7 @@ import type {
   DirListing,
   EntryKind,
   FileContent,
+  ImagePreview,
   MoveFailure,
   MoveOutcome,
   Result
@@ -149,6 +152,119 @@ async function readFileForViewer(input: string): Promise<FileContent> {
   }
 }
 
+/**
+ * Below this a preview is sent exactly as the file is on disk: small enough
+ * that the base64 round trip is cheap, and it keeps what re-encoding would lose
+ * — an animated GIF stays animated, an SVG stays vector, a JPEG keeps its EXIF
+ * orientation (which `nativeImage` does not apply).
+ */
+const RAW_PREVIEW_BYTES = 16 * 1024 * 1024
+
+/**
+ * A downscaled preview never needs to be larger than this on its longest side.
+ * The footer shows at most 160x64 CSS px — 320x128 on a HiDPI display — so the
+ * headroom is for crispness rather than size.
+ */
+const PREVIEW_MAX_DIM = 512
+
+/**
+ * Ceiling for a file too large to send raw *and* one the platform decoder
+ * cannot read (an SVG, or a format `nativeImage` does not handle). Reading it
+ * whole is then the only way to show it, but past this the payload stops being
+ * worth moving at all for a 64px strip.
+ */
+const LARGE_RAW_PREVIEW_BYTES = 64 * 1024 * 1024
+
+/**
+ * Read a regular file to the end. A single read of a regular file can return
+ * short, so keep going until the buffer is full or the file ends.
+ */
+async function readAll(handle: FileHandle, size: number): Promise<Buffer> {
+  const buffer = Buffer.allocUnsafe(size)
+  let filled = 0
+  while (filled < size) {
+    const { bytesRead } = await handle.read(buffer, filled, size - filled, filled)
+    if (bytesRead === 0) break
+    filled += bytesRead
+  }
+  return buffer.subarray(0, filled)
+}
+
+/**
+ * Decode an image and shrink it to fit the preview, as a PNG data URL, or null
+ * if this build cannot read the format. This is what keeps an arbitrarily large
+ * source from becoming an arbitrarily large payload: past `RAW_PREVIEW_BYTES`
+ * the bar gets the thumbnail, not the original. The decode is synchronous, so
+ * it does block main for the length of one image — acceptable for a cursor
+ * landing on a row, and the reason the small-file path skips it entirely.
+ */
+function downscalePreview(target: string): string | null {
+  const image = nativeImage.createFromPath(target)
+  if (image.isEmpty()) return null
+
+  const { width, height } = image.getSize()
+  const longest = Math.max(width, height)
+  if (longest <= 0) return null
+  if (longest <= PREVIEW_MAX_DIM) return image.toDataURL()
+
+  const scale = PREVIEW_MAX_DIM / longest
+  const resized = image.resize({
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale))
+  })
+  return resized.toDataURL()
+}
+
+/**
+ * Read a regular image file for a pane's status-bar preview. The extension is
+ * the same map the renderer used to decide to ask, so a successful read is
+ * always a format it can decode. O_NONBLOCK and the regular-file check mirror
+ * `readFileForViewer`: a FIFO must not block the handler, and a directory or
+ * device is not an image. Size is handled rather than refused — a small file
+ * goes over as-is, a large one is downscaled.
+ */
+async function readImageForPreview(input: string): Promise<ImagePreview> {
+  const target = path.resolve(input)
+  const mime = imageMimeFor(target)
+  if (!mime) {
+    throw Object.assign(new Error(`"${path.basename(target)}" is not a supported image`), {
+      code: 'EINVAL'
+    })
+  }
+
+  let size = 0
+  const handle = await fs.open(target, fsConstants.O_RDONLY | fsConstants.O_NONBLOCK)
+
+  try {
+    const stats = await handle.stat()
+    if (!stats.isFile()) {
+      throw Object.assign(new Error(`"${path.basename(target)}" is not a regular file`), {
+        code: 'EINVAL'
+      })
+    }
+
+    size = stats.size
+    if (size <= RAW_PREVIEW_BYTES) {
+      const bytes = await readAll(handle, size)
+      return { dataUrl: `data:${mime};base64,${bytes.toString('base64')}` }
+    }
+  } finally {
+    await handle.close()
+  }
+
+  const downscaled = downscalePreview(target)
+  if (downscaled !== null) return { dataUrl: downscaled }
+
+  // The decoder could not read it, so the bytes have to travel after all.
+  if (size > LARGE_RAW_PREVIEW_BYTES) {
+    throw Object.assign(new Error(`"${path.basename(target)}" is too large to preview`), {
+      code: 'E2BIG'
+    })
+  }
+  const bytes = await fs.readFile(target)
+  return { dataUrl: `data:${mime};base64,${bytes.toString('base64')}` }
+}
+
 export function registerFsHandlers(): void {
   ipcMain.handle('fs:home', () => os.homedir())
 
@@ -170,6 +286,17 @@ export function registerFsHandlers(): void {
     }
     try {
       return { ok: true, data: await readFileForViewer(target) }
+    } catch (error) {
+      return { ok: false, error: toFsError(error) }
+    }
+  })
+
+  ipcMain.handle('fs:read-image', async (_event, target: string): Promise<Result<ImagePreview>> => {
+    if (typeof target !== 'string' || target.length === 0) {
+      return { ok: false, error: { code: 'EINVAL', message: 'No image to read' } }
+    }
+    try {
+      return { ok: true, data: await readImageForPreview(target) }
     } catch (error) {
       return { ok: false, error: toFsError(error) }
     }

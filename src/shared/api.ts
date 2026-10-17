@@ -4,6 +4,7 @@ import type {
   DirListing,
   FileContent,
   FsChangeEvent,
+  ImagePreview,
   MoveOutcome,
   PtyDataEvent,
   PtyExitEvent,
@@ -20,6 +21,12 @@ export interface BipaneFsApi {
    * content come back as an error rather than a lossy decode.
    */
   read(target: string): Promise<Result<FileContent>>
+  /**
+   * Read a regular image file for a pane's status-bar preview, as a `data:`
+   * URL. Only decodable formats and files within the preview ceiling come back;
+   * anything else is an error the bar simply renders nothing for.
+   */
+  readImage(target: string): Promise<Result<ImagePreview>>
   /**
    * Overwrite a regular text file with edited content (the editor's save).
    * Returns the resolved path that was written.

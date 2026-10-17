@@ -21,23 +21,30 @@ There is no linter or test runner configured yet.
 
 ```
 src/main/index.ts        window lifecycle, single-instance lock
-src/main/ipc/fs.ts       IPC: fs:home, fs:list, fs:read, fs:write, fs:open,
-                         fs:reveal
+src/main/ipc/fs.ts       IPC: fs:home, fs:list, fs:read, fs:write, fs:read-image,
+                         fs:open, fs:reveal
                          (fs:read/fs:write serve the viewer: regular text files
                          only, binary and oversized reads refused/truncated)
+                         (fs:read-image serves a pane footer's preview: a
+                         decodable image as a data: URL, downscaled in main
+                         when the file is too large to hand over whole)
 src/main/ipc/watch.ts    IPC: fs:watch, fs:unwatch; pushes fs:changed when a
                          watched directory's contents change (fs.watch = inotify)
 src/main/ipc/pty.ts      IPC: pty:create/write/resize/kill/state, pushes pty:data, pty:exit
 src/main/ipc/window.ts   IPC: window:minimize/toggle-maximize/close/is-maximized
 src/preload/index.ts     contextBridge -> window.bipane (implements BipaneApi)
-src/shared/types.ts      DirEntry/DirListing/Result/Pty* types (main + renderer)
+src/shared/types.ts      DirEntry/DirListing/Result/ImagePreview/Pty* types (main + renderer)
 src/shared/api.ts        BipaneApi interface (the preload contract)
+src/shared/image.ts      extension -> previewable image MIME map, shared so the
+                         renderer and main agree on what a footer may preview
 src/renderer/src/App.vue global keyboard model, workspace stack, layout, focus
 src/renderer/src/components/TitleBar.vue     frameless title bar + window controls;
                                              hosts the workspace tab strip
 src/renderer/src/components/WorkspaceTabs.vue the tab strip, rendered inside the
                                              title bar (select/close/new)
 src/renderer/src/components/FilePanel.vue    one pane: path bar, list, footer
+                                             (the footer previews the cursor's
+                                             image when it is one)
 src/renderer/src/components/TerminalPane.vue xterm over the active workspace's
                                              shell: the collapsed command line
                                              and, when expanded, the full terminal
@@ -169,6 +176,25 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   mutes the panes at the shell's directory from a submitted command until it
   finishes and settles. A download in another directory, or one that starts
   after the tail, still sweeps; so does `Ctrl+R`.
+- **A pane footer previews the image under its cursor.** The footer grows to
+  fit a thumbnail read through `fs:read-image`, which is the only way to show a
+  file the renderer has no URL for: the extension->MIME map lives in
+  `src/shared/image.ts` so both sides agree on what is previewable, main returns
+  a `data:` URL (the renderer CSP allows `img-src data:` but not `file:`), and
+  `FilePanel` reserves the space while the read is in flight so arrowing between
+  images does not collapse and re-expand the list on every step. The read is
+  keyed by path *and* size/mtime and token-guarded, so an external rewrite
+  reloads while a slow read for a row the user has left cannot land on the newer
+  one. A mapped extension that still fails to decode (a truncated PNG) clears
+  the preview through the `<img>` error handler and releases the space — the
+  bar shows nothing rather than a broken frame. Size is handled in main rather
+  than refused: a file up to 16 MiB travels as its own bytes — so an animated
+  GIF stays animated, an SVG stays vector and a JPEG keeps its EXIF orientation
+  — and anything larger is decoded with `nativeImage` and downscaled to 512px,
+  so the payload stays small however large the source is. That decode is
+  synchronous and blocks main for the length of one image, which is exactly why
+  the small-file path skips it. Only a file that is both past 64 MiB and
+  undecodable by the platform is refused, and its reserved space is given back.
 - **Intercepted keys must `stopPropagation`, not just `preventDefault`.** xterm
   handles keys from a capture listener on its own textarea and does *not* consult
   `defaultPrevented`, so a merely-prevented navigation key is still forwarded to
