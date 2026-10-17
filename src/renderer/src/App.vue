@@ -133,13 +133,24 @@ watch(shellCwd, (next) => {
   void activePane.value.navigateTo(next)
 })
 
+/**
+ * Claim a key for the app. `preventDefault` is not enough on its own: xterm
+ * handles keys from a capture listener on its own textarea and does not consult
+ * `defaultPrevented`, so without stopping propagation it would also forward the
+ * key to the shell (Up recalling history, Home moving the line cursor).
+ */
+function consume(event: KeyboardEvent): void {
+  event.preventDefault()
+  event.stopPropagation()
+}
+
 function handlePaneKey(event: KeyboardEvent): void {
   const pane = activePane.value
   const searching = pane.state.searchActive
   const hasInput = shellInput.value.length > 0
 
   if (event.key === 'Tab') {
-    event.preventDefault()
+    consume(event)
     setActive(activeSide.value === 'left' ? 'right' : 'left')
     return
   }
@@ -147,7 +158,7 @@ function handlePaneKey(event: KeyboardEvent): void {
   if (event.ctrlKey || event.altKey || event.metaKey) return
 
   if (event.key === 'Escape') {
-    event.preventDefault()
+    consume(event)
     if (searching) {
       pane.closeSearch()
       return
@@ -160,38 +171,38 @@ function handlePaneKey(event: KeyboardEvent): void {
     return
   }
 
-  // While there is a line to edit, the shell's own line editing keeps it.
-  if (searching && (event.key === 'Backspace' || event.key === 'Delete')) return
-  if (event.key === 'Backspace' && hasInput) return
+  // Backspace belongs to whichever input owns the text — the shell's line
+  // editor or the search box. It deliberately does not navigate the panel.
+  if (event.key === 'Backspace' || event.key === 'Delete') return
 
-  if (event.repeat && (event.key === 'Enter' || event.key === 'Backspace')) {
-    event.preventDefault()
+  if (event.repeat && event.key === 'Enter') {
+    consume(event)
     return
   }
 
   switch (event.key) {
     case 'ArrowDown':
-      event.preventDefault()
+      consume(event)
       pane.moveCursor(1)
       break
     case 'ArrowUp':
-      event.preventDefault()
+      consume(event)
       pane.moveCursor(-1)
       break
     case 'PageDown':
-      event.preventDefault()
+      consume(event)
       pane.movePage(1)
       break
     case 'PageUp':
-      event.preventDefault()
+      consume(event)
       pane.movePage(-1)
       break
     case 'Home':
-      event.preventDefault()
+      consume(event)
       pane.moveTo(0)
       break
     case 'End':
-      event.preventDefault()
+      consume(event)
       pane.moveTo(pane.state.entries.length - 1)
       break
     case 'Enter':
@@ -200,12 +211,8 @@ function handlePaneKey(event: KeyboardEvent): void {
         if (!terminalExpanded.value) terminalExpanded.value = true
         return
       }
-      event.preventDefault()
+      consume(event)
       void pane.activate()
-      break
-    case 'Backspace':
-      event.preventDefault()
-      void pane.goUp()
       break
     default:
       break
@@ -247,8 +254,14 @@ function onKeydown(event: KeyboardEvent): void {
   handlePaneKey(event)
 }
 
+/**
+ * Registered in setup, before any child mounts, so it runs ahead of xterm's own
+ * capture listener. `stopPropagation` in `consume` is what actually keeps
+ * navigation keys away from the shell.
+ */
+window.addEventListener('keydown', onKeydown, { capture: true })
+
 onMounted(() => {
-  window.addEventListener('keydown', onKeydown, { capture: true })
   void left.init()
   void right.init()
 })

@@ -39,16 +39,17 @@ src/renderer/src/lib/format.ts               size/date/permission formatting
 ```
 
 Keys: `Tab` switches panes, arrows/`Home`/`End`/`PgUp`/`PgDn` move the cursor,
-`Enter` descends or opens, `Backspace` goes up, `Ctrl+O` toggles the terminal,
-`Alt+S` starts an incremental search.
+`Enter` descends or opens, `Ctrl+O` toggles the terminal, `Alt+S` starts an
+incremental search. `Backspace` never navigates: it belongs to the shell's line
+editor (or the search box), so the `..` row is the way up.
 
 The bottom strip is the shell itself: the same xterm, collapsed to three rows,
 so the prompt, font and echo are the shell's own rather than a look-alike
 widget. `Ctrl+O` expands it into the full terminal, which then owns the
 keyboard outright. While it is collapsed, printable characters go to the shell
 and navigation keys still drive the panels; `Enter` runs the typed line, or
-activates the panel entry when the line is empty, and `Backspace` returns to
-its "go up" meaning once the line is empty.
+activates the panel entry when the line is empty. `Backspace` is left alone so
+it edits the line, and reaching the parent is the `..` row's job.
 
 ## Gotchas
 
@@ -92,10 +93,16 @@ its "go up" meaning once the line is empty.
 - **`pty:state` is Linux-only** (`/proc/<pid>/cwd` for the cwd, `tpgid` in
   `/proc/<pid>/stat` to tell whether the shell is at a prompt). Elsewhere it
   reports `idle: false`, which disables injection rather than guessing.
+- **Intercepted keys must `stopPropagation`, not just `preventDefault`.** xterm
+  handles keys from a capture listener on its own textarea and does *not* consult
+  `defaultPrevented`, so a merely-prevented navigation key is still forwarded to
+  the shell — Up recalls history and Home moves the line cursor, silently
+  corrupting a half-typed command. `consume()` in `App.vue` does both, and that
+  listener is registered in setup so it runs ahead of xterm's.
 - **The collapsed strip is the shell, so its input line is state we model.**
   `useShell.inputLine` is fed from xterm's `onData`. It decides whether `Enter`
-  runs the line or activates the panel entry, whether `Backspace` goes up, and
-  it stops the cwd sync from injecting a `cd` into a half-typed command.
+  runs the line or activates the panel entry, and it stops the cwd sync from
+  injecting a `cd` into a half-typed command.
 - **Panel -> shell cwd sync types a real `cd` into a real prompt**, so the shell
   echoes it and the strip fills with commands the user never issued. The
   injected line carries a trailing `printf '\033[1A\033[2K'` that walks back
