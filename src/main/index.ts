@@ -5,6 +5,15 @@ import { registerFsHandlers } from './ipc/fs'
 import { killAllSessions, registerPtyHandlers } from './ipc/pty'
 import { closeAllWatchers, registerWatchHandlers } from './ipc/watch'
 import { registerWindowHandlers } from './ipc/window'
+import { registerMediaProtocol, registerMediaScheme } from './media'
+
+// The hardware video decoder hands its frames to the compositor as DMA-BUFs,
+// and a Linux session that cannot import those (a VM, a driver without a working
+// GBM path) loses the GPU process to it: the decode fails and the rendering of
+// the whole window goes with it. A footer preview is a 64px thumbnail the user
+// is pointing at, never a viewing session, so decoding it in software is the
+// safer trade — a preview must not be able to take the window down with it.
+app.commandLine.appendSwitch('disable-accelerated-video-decode')
 
 const APP_BACKGROUND = '#1e1e1e'
 const APP_ICON = join(import.meta.dirname, '..', '..', 'resources', 'icon.png')
@@ -55,6 +64,9 @@ function createWindow(): BrowserWindow {
   return window
 }
 
+// The media scheme has to be declared before the app is ready; its handler is
+// installed once it is. Everything else is a plain IPC handler and can go now.
+registerMediaScheme()
 registerFsHandlers()
 registerPtyHandlers()
 registerWatchHandlers()
@@ -72,6 +84,7 @@ if (!gotLock) {
   })
 
   void app.whenReady().then(() => {
+    registerMediaProtocol()
     createWindow()
 
     app.on('activate', () => {

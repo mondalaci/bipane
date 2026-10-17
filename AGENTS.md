@@ -34,16 +34,21 @@ src/main/imageSize.ts    header-only image dimensions (PNG/JPEG+EXIF/GIF/BMP/
                          ICO/WebP/SVG); no decode, so it answers in well under
                          a millisecond even for a file the preview has to
                          downscale
+src/main/media.ts        the bipane-media scheme a footer plays a video through:
+                         a ranged byte stream, so the element fetches the
+                         metadata and the frames it needs rather than a
+                         hundred-megabyte file
 src/main/ipc/watch.ts    IPC: fs:watch, fs:unwatch; pushes fs:changed when a
                          watched directory's contents change (fs.watch = inotify)
 src/main/ipc/pty.ts      IPC: pty:create/write/resize/kill/state, pushes pty:data, pty:exit
 src/main/ipc/window.ts   IPC: window:minimize/toggle-maximize/close/is-maximized
 src/preload/index.ts     contextBridge -> window.bipane (implements BipaneApi)
-src/shared/types.ts      DirEntry/DirListing/Result/ImagePreview/ImageSize/
+src/shared/types.ts      DirEntry/DirListing/Result/ImagePreview/PixelSize/
                          Pty* types (main + renderer)
 src/shared/api.ts        BipaneApi interface (the preload contract)
 src/shared/image.ts      extension -> previewable image MIME map, shared so the
                          renderer and main agree on what a footer may preview
+src/shared/video.ts      the same for video, plus the media scheme's name
 src/renderer/src/App.vue global keyboard model, workspace stack, layout, focus
 src/renderer/src/components/TitleBar.vue     frameless title bar + window controls;
                                              hosts the workspace tab strip
@@ -51,7 +56,9 @@ src/renderer/src/components/WorkspaceTabs.vue the tab strip, rendered inside the
                                              title bar (select/close/new)
 src/renderer/src/components/FilePanel.vue    one pane: path bar, list, footer
                                              (the footer previews the cursor's
-                                             image when it is one)
+                                             image, and plays its video; the whole
+                                             pane becomes a display when the other
+                                             pane asks it to)
 src/renderer/src/components/TerminalPane.vue xterm over the active workspace's
                                              shell: the collapsed command line
                                              and, when expanded, the full terminal
@@ -63,13 +70,17 @@ src/renderer/src/composables/useShell.ts     createShell(id): one shell session
                                              (own process, buffer, cwd, line model)
 src/renderer/src/composables/useDirectory.ts per-pane navigation state + actions
 src/renderer/src/lib/format.ts               size/date/permission formatting
+src/renderer/src/lib/preview.ts              what a row is previewable as (image or
+                                             video), keyed by content, and what one
+                                             pane asks another to display
 src/renderer/src/lib/monaco.ts               lazy monaco import + worker wiring
 src/renderer/src/lib/fileIcon.ts             per-entry icon: name/extension -> 24x24 svg
                                              (FILENAME_ICONS, EXTENSION_ICONS, fallback text)
 ```
 
 Keys: `Tab` switches panes, arrows/`Home`/`End`/`PgUp`/`PgDn` move the cursor,
-`Enter` descends or opens with the system default app, `F3` opens a regular file
+`Enter` descends or opens with the system default app — except on an image or a
+video, which it displays in the other pane instead (see below), `F3` opens a regular file
 read-only in the Monaco viewer, `F4` opens it for editing with Ctrl+S to save (a
 directory still descends on `F3`), `Insert` marks the current entry and moves down,
 right-click marks a row and dragging the held button paints that mark across
@@ -220,6 +231,45 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   which is exactly why the small-file path skips it. Only a file that is both
   past 64 MiB and undecodable by the platform is refused, and its reserved space
   is given back.
+- **A pane footer plays the video under its cursor, silently.** A video cannot
+  be read whole the way an image can — one frame's worth is a hundred megabytes
+  here — so main serves it as a ranged byte stream on its own `bipane-media`
+  scheme (`src/main/media.ts`) and the footer mounts a `<video>` on it. The
+  element is muted (a preview never makes a sound) and plays once rather than
+  looping: a looping 4K clip decodes for as long as the cursor happens to rest
+  on the row, measured at over half a core. The scheme is declared before the
+  app is ready, `media-src` carries it in the CSP, and only previewable
+  extensions are served, so it cannot become a reader for anything the bar would
+  not have offered anyway. A `.mov` is served as `video/mp4`: Chromium plays the
+  H.264 or HEVC inside an ISOBMFF container but will not accept the QuickTime
+  type, and `videoMimeFor` is the only place that mapping lives. Its shape comes
+  from the element's own metadata — there is no header parser for video, as there
+  is for images — so the element is mounted, and therefore starts fetching, only
+  once the cursor settles: like the image read, a burst over a folder of clips
+  must not start a fetch per row. Finally the window disables the hardware video
+  decoder (in `src/main/index.ts`): its frames reach the compositor as DMA-BUFs
+  that a Linux session without a working GBM path cannot import, which takes the
+  GPU process down with the decode and disturbs the window's rendering over a
+  preview nobody asked to watch.
+- **A display is a mode of the panes, not a third overlay.** `Enter` on an image
+  or a video hands it to the *other* pane to show at full size (`Enter` again
+  takes it away, and `Escape` leaves the mode): the cursor stays where it was,
+  the pane that asked keeps the keyboard, and the display follows that cursor
+  from row to row — so the two panes are a browser and a screen rather than two
+  browsers. What the screen shows is *derived* from the browser's cursor
+  (`stageTarget` in `App.vue`), not pushed to it, which is what makes navigating
+  update it for free; leaving media for an ordinary row empties the screen
+  instead of freezing the last picture. `Tab` is claimed while a display is up —
+  it would move the keyboard, and with it which cursor is being displayed, to the
+  other pane — and so is `Ctrl+U`, which swaps the panes themselves; switching
+  tabs or closing one leaves the mode too, since the panes it belonged to are
+  gone. The reveal is one animation of one element: the media is laid out where
+  it will sit, then transformed back onto the footer thumbnail it grew out of
+  (`translate` and `scale` together, measured off that box through the source
+  pane's `previewRect()`), and released. It plays once per *entry* into the mode,
+  guarded by `stage.animation`, so arrowing through a folder swaps the display in
+  place rather than re-animating on every row — and a row whose thumbnail is not
+  up yet has nothing to grow from, so it simply appears.
 - **Intercepted keys must `stopPropagation`, not just `preventDefault`.** xterm
   handles keys from a capture listener on its own textarea and does *not* consult
   `defaultPrevented`, so a merely-prevented navigation key is still forwarded to
@@ -296,7 +346,9 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   `border-border` over raw hex values. The terminal resolves its font from the
   `--font-mono` token at runtime, so the mono font is defined in one place.
 - The renderer has a CSP in `src/renderer/index.html`. Dev-only allowances
-  (`ws://localhost:*`, `'unsafe-inline'` styles) are required for Vite HMR.
+  (`ws://localhost:*`, `'unsafe-inline'` styles) are required for Vite HMR, and
+  `img-src data:` / `media-src bipane-media:` are what let a footer show a
+  preview the renderer has no URL of its own for.
 
 ## Verifying changes in dev
 

@@ -5,7 +5,7 @@ import type {
   FileContent,
   FsChangeEvent,
   ImagePreview,
-  ImageSize,
+  PixelSize,
   MoveOutcome,
   PtyDataEvent,
   PtyExitEvent,
@@ -34,7 +34,7 @@ export interface BipaneFsApi {
    * itself. Null when the target is not a previewable image, or when its header
    * does not carry the dimensions cheaply — nothing to reserve, not an error.
    */
-  imageSize(target: string): Promise<ImageSize | null>
+  imageSize(target: string): Promise<PixelSize | null>
   /**
    * Overwrite a regular text file with edited content (the editor's save).
    * Returns the resolved path that was written.

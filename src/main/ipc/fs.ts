@@ -15,7 +15,7 @@ import type {
   EntryKind,
   FileContent,
   ImagePreview,
-  ImageSize,
+  PixelSize,
   MoveFailure,
   MoveOutcome,
   Result
@@ -338,7 +338,7 @@ const SIZE_PROBE_BYTES = 256 * 1024
  * the probe cannot measure answers null rather than failing: there is simply no
  * shape to reserve.
  */
-async function readImageSizeForPreview(input: string): Promise<ImageSize | null> {
+async function readImageSizeForPreview(input: string): Promise<PixelSize | null> {
   const target = path.resolve(input)
   if (!imageMimeFor(target)) return null
 
@@ -390,7 +390,7 @@ export function registerFsHandlers(): void {
     }
   })
 
-  ipcMain.handle('fs:image-size', async (_event, target: string): Promise<ImageSize | null> => {
+  ipcMain.handle('fs:image-size', async (_event, target: string): Promise<PixelSize | null> => {
     if (typeof target !== 'string' || target.length === 0) return null
     try {
       return await readImageSizeForPreview(target)

@@ -65,12 +65,12 @@ export interface ImagePreview {
 }
 
 /**
- * An image's pixel dimensions, read from its header rather than by decoding it,
- * so a pane can reserve a preview of the right shape before the image arrives.
- * Nullable everywhere it is returned: a format whose header does not carry them
- * cheaply simply has no shape to reserve.
+ * A picture's pixel dimensions, read from its header rather than by decoding
+ * it, so a pane can reserve a preview of the right shape before the picture
+ * arrives. Nullable everywhere it is returned: a format whose header does not
+ * carry them cheaply simply has no shape to reserve.
  */
-export interface ImageSize {
+export interface PixelSize {
   width: number
   height: number
 }

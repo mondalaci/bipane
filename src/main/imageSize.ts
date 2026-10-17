@@ -1,4 +1,4 @@
-import type { ImageSize } from '@shared/types'
+import type { PixelSize } from '@shared/types'
 
 /**
  * Pixel dimensions read out of an image file's header, without decoding it.
@@ -16,7 +16,7 @@ import type { ImageSize } from '@shared/types'
  * reserved ahead of it.
  */
 
-function size(width: number, height: number): ImageSize | null {
+function size(width: number, height: number): PixelSize | null {
   if (!Number.isFinite(width) || !Number.isFinite(height)) return null
   if (width <= 0 || height <= 0) return null
   return { width, height }
@@ -51,19 +51,19 @@ function matches(b: Buffer, o: number, text: string): boolean {
 }
 
 /** PNG and APNG: the IHDR chunk always sits first, at a fixed offset. */
-function pngSize(b: Buffer): ImageSize | null {
+function pngSize(b: Buffer): PixelSize | null {
   if (!matches(b, 0, '\x89PNG\r\n\x1a\n') || !matches(b, 12, 'IHDR')) return null
   return size(u32be(b, 16), u32be(b, 20))
 }
 
 /** GIF: the logical screen descriptor, right after the six-byte signature. */
-function gifSize(b: Buffer): ImageSize | null {
+function gifSize(b: Buffer): PixelSize | null {
   if (!matches(b, 0, 'GIF87a') && !matches(b, 0, 'GIF89a')) return null
   return size(u16le(b, 6), u16le(b, 8))
 }
 
 /** BMP: BITMAPCOREHEADER carries 16-bit fields, BITMAPINFOHEADER 32-bit ones. */
-function bmpSize(b: Buffer): ImageSize | null {
+function bmpSize(b: Buffer): PixelSize | null {
   if (!matches(b, 0, 'BM')) return null
   const header = u32le(b, 14)
   if (header === 12) return size(u16le(b, 18), u16le(b, 20))
@@ -72,13 +72,13 @@ function bmpSize(b: Buffer): ImageSize | null {
 }
 
 /** ICO: the first directory entry, where 0 stands for the 256px cap. */
-function icoSize(b: Buffer): ImageSize | null {
+function icoSize(b: Buffer): PixelSize | null {
   if (b.length < 22) return null
   if (u16le(b, 0) !== 0 || u16le(b, 2) !== 1 || u16le(b, 4) < 1) return null
   return size(b[6] === 0 ? 256 : (b[6] ?? 0), b[7] === 0 ? 256 : (b[7] ?? 0))
 }
 
-function webpSize(b: Buffer): ImageSize | null {
+function webpSize(b: Buffer): PixelSize | null {
   if (!matches(b, 0, 'RIFF') || !matches(b, 8, 'WEBP')) return null
 
   // Lossy: a 3-byte frame tag, the start code, then two 14-bit dimensions.
@@ -131,7 +131,7 @@ function exifOrientation(b: Buffer, tiff: number): number | null {
 }
 
 /** JPEG: walk the segments to the first SOF, which carries the frame size. */
-function jpegSize(b: Buffer): ImageSize | null {
+function jpegSize(b: Buffer): PixelSize | null {
   if (b[0] !== 0xff || b[1] !== 0xd8) return null
 
   let orientation = 1
@@ -178,7 +178,7 @@ function jpegSize(b: Buffer): ImageSize | null {
  * SVG: width/height attributes when they are absolute, otherwise the viewBox.
  * A percentage width says nothing on its own, so the viewBox is preferred there.
  */
-function svgSize(b: Buffer): ImageSize | null {
+function svgSize(b: Buffer): PixelSize | null {
   const text = b.toString('utf8', 0, Math.min(b.length, 8192))
   if (!/<svg[\s>]/i.test(text)) return null
 
@@ -205,7 +205,7 @@ function svgSize(b: Buffer): ImageSize | null {
  * The dimensions a preview can be reserved from, or null if the header does not
  * say (an unreadable or unsupported format, or a truncated probe).
  */
-export function readImageSize(bytes: Buffer): ImageSize | null {
+export function readImageSize(bytes: Buffer): PixelSize | null {
   return (
     pngSize(bytes) ??
     gifSize(bytes) ??

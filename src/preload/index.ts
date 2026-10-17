@@ -7,7 +7,7 @@ import type {
   FileContent,
   FsChangeEvent,
   ImagePreview,
-  ImageSize,
+  PixelSize,
   MoveOutcome,
   PtyDataEvent,
   PtyExitEvent,
@@ -22,7 +22,7 @@ const api: BipaneApi = {
     read: (target: string): Promise<Result<FileContent>> => ipcRenderer.invoke('fs:read', target),
     readImage: (target: string): Promise<Result<ImagePreview>> =>
       ipcRenderer.invoke('fs:read-image', target),
-    imageSize: (target: string): Promise<ImageSize | null> =>
+    imageSize: (target: string): Promise<PixelSize | null> =>
       ipcRenderer.invoke('fs:image-size', target),
     write: (target: string, text: string): Promise<Result<string>> =>
       ipcRenderer.invoke('fs:write', target, text),

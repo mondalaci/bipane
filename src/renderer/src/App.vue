@@ -9,6 +9,7 @@ import TitleBar from '@renderer/components/TitleBar.vue'
 import FileViewer from '@renderer/components/FileViewer.vue'
 import { createWorkspace, type Workspace } from '@renderer/composables/useWorkspace'
 import type { PaneController, PaneEntry } from '@renderer/composables/useDirectory'
+import { previewTargetFor, type StageRequest } from '@renderer/lib/preview'
 import type { PanelSide } from '@shared/types'
 
 /**
@@ -78,6 +79,76 @@ const copyJob = ref<{ entries: PaneEntry[]; destination: string } | null>(null)
  */
 const moveJob = ref<{ entries: PaneEntry[]; destination: string } | null>(null)
 
+/**
+ * The pane that is displaying another pane's media, or null when none is. Enter
+ * on an image or a video puts the app in this mode: the cursor stays where it
+ * is — in the pane that asked — and the *other* pane becomes a display for
+ * whatever that cursor is on, following it from row to row until Escape.
+ */
+const stageSide = ref<PanelSide | null>(null)
+
+/** The pane being navigated while a display is up: always the one that asked for it. */
+const stageSource = computed<PanelSide | null>(() =>
+  stageSide.value === null ? null : stageSide.value === 'left' ? 'right' : 'left'
+)
+
+/**
+ * The media the display is showing, derived from the source pane's cursor — so
+ * navigating updates it without anything having to be told, and leaving media
+ * for an ordinary file empties the display rather than freezing the last one.
+ */
+const stageTarget = computed(() => {
+  const side = stageSource.value
+  if (side === null) return null
+  return previewTargetFor((side === 'left' ? left.value : right.value).current())
+})
+
+/**
+ * The reveal is for arriving at a display, not for every row the cursor crosses
+ * while one is up: this counts the times the display goes from empty to full.
+ */
+const stageAnimation = ref(0)
+
+watch(
+  () => stageTarget.value !== null,
+  (present) => {
+    if (present) stageAnimation.value += 1
+  }
+)
+
+const leftPanel = ref<InstanceType<typeof FilePanel> | null>(null)
+const rightPanel = ref<InstanceType<typeof FilePanel> | null>(null)
+
+/**
+ * What the displaying pane is asked to show. It reaches back through the source
+ * pane's own footer box at the moment it is about to be revealed, rather than
+ * holding a rectangle that would be stale as soon as the cursor moved.
+ */
+const stageRequest = computed<StageRequest | null>(() => {
+  const target = stageTarget.value
+  const side = stageSource.value
+  if (target === null || side === null) return null
+
+  return {
+    target,
+    animation: stageAnimation.value,
+    from: () => (side === 'left' ? leftPanel.value : rightPanel.value)?.previewRect() ?? null
+  }
+})
+
+/**
+ * Display the media under the active pane's cursor in the other pane. Pressing
+ * Enter again on what is already displayed takes the display away.
+ */
+function toggleStage(): void {
+  if (stageSide.value !== null) exitStage()
+  else stageSide.value = activeSide.value === 'left' ? 'right' : 'left'
+}
+
+function exitStage(): void {
+  stageSide.value = null
+}
+
 const panelHost = ref<HTMLElement | null>(null)
 const terminalRef = ref<InstanceType<typeof TerminalPane> | null>(null)
 
@@ -86,6 +157,9 @@ function setActive(side: PanelSide): void {
 }
 
 function swapPanels(): void {
+  // The two panes change places, and with them which cursor a display would be
+  // following, so a display up at the time goes.
+  exitStage()
   activeWorkspace.value.swapPanels()
 }
 
@@ -171,6 +245,7 @@ function toggleSearch(): void {
  * be.
  */
 function addWorkspace(): void {
+  exitStage()
   const workspace = makeWorkspace()
   workspaces.value = [...workspaces.value, workspace]
   activeIndex.value = workspaces.value.length - 1
@@ -183,12 +258,14 @@ function selectWorkspace(index: number): void {
     toggleTerminal()
     return
   }
+  exitStage()
   activeIndex.value = index
   void nextTick(() => focusPanes())
 }
 
 function closeWorkspace(index: number): void {
   if (workspaces.value.length <= 1) return
+  exitStage()
   const workspace = workspaces.value[index]
   if (!workspace) return
 
@@ -205,6 +282,7 @@ function closeWorkspace(index: number): void {
 function switchWorkspace(delta: number): void {
   const count = workspaces.value.length
   if (count <= 1) return
+  exitStage()
   activeIndex.value = (activeIndex.value + delta + count) % count
   void nextTick(() => focusPanes())
 }
@@ -494,7 +572,11 @@ function handlePaneKey(event: KeyboardEvent): void {
       // exactly as the user left it.
       if (hasInput) return
       consume(event)
-      void pane.activate()
+      // An image or a video is displayed in the other pane rather than handed
+      // to whatever the system opens it with; anything else — a directory, an
+      // ordinary file — opens exactly as it did.
+      if (previewTargetFor(pane.current()) === null) void pane.activate()
+      else toggleStage()
       break
     default:
       break
@@ -528,6 +610,22 @@ function onKeydown(event: KeyboardEvent): void {
       else cancelCopy()
     }
     return
+  }
+
+  // A display is a mode of the panes rather than an overlay of their own: the
+  // cursor stays in the pane that asked for it, so Tab must not move the
+  // keyboard — and with it which cursor is being displayed — to the other pane,
+  // and Escape is what leaves.
+  if (stageSide.value !== null) {
+    if (event.key === 'Escape') {
+      consume(event)
+      exitStage()
+      return
+    }
+    if (event.key === 'Tab') {
+      consume(event)
+      return
+    }
   }
 
   const isSearchToggle =
@@ -662,16 +760,20 @@ onBeforeUnmount(() => {
       >
         <FilePanel
           :key="`${activeWorkspace.id}:left`"
+          ref="leftPanel"
           :controller="left"
           :active="activeSide === 'left'"
+          :stage="stageSide === 'left' ? stageRequest : null"
           @select="setActive('left')"
           @pointer-down="focusPanes"
         />
         <div class="w-px shrink-0 bg-border"></div>
         <FilePanel
           :key="`${activeWorkspace.id}:right`"
+          ref="rightPanel"
           :controller="right"
           :active="activeSide === 'right'"
+          :stage="stageSide === 'right' ? stageRequest : null"
           @select="setActive('right')"
           @pointer-down="focusPanes"
         />
