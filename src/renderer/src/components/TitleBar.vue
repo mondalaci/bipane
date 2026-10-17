@@ -92,7 +92,7 @@ function onDoubleClick(event: MouseEvent): void {
     <div class="no-drag flex h-full shrink-0 items-stretch gap-1.5">
       <button
         type="button"
-        class="flex w-11 items-center justify-center text-fg-dim transition-colors hover:bg-hover hover:text-fg"
+        class="flex w-8 items-center justify-center text-fg-dim transition-colors hover:bg-hover hover:text-fg"
         title="Minimize"
         @click="minimize"
       >
@@ -111,7 +111,7 @@ function onDoubleClick(event: MouseEvent): void {
 
       <button
         type="button"
-        class="flex w-11 items-center justify-center text-fg-dim transition-colors hover:bg-hover hover:text-fg"
+        class="flex w-8 items-center justify-center text-fg-dim transition-colors hover:bg-hover hover:text-fg"
         :title="maximized ? 'Restore' : 'Maximize'"
         @click="toggleMaximize"
       >
@@ -144,7 +144,7 @@ function onDoubleClick(event: MouseEvent): void {
 
       <button
         type="button"
-        class="flex w-11 items-center justify-center text-fg-dim transition-colors hover:bg-danger hover:text-white"
+        class="flex w-8 items-center justify-center text-fg-dim transition-colors hover:bg-danger hover:text-white"
         title="Close"
         @click="close"
       >
