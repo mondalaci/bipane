@@ -165,20 +165,24 @@ function toggleSearch(): void {
 
 /**
  * Workspace tabs. Ctrl+T opens a new terminal — a fresh pair of panes at home
- * plus a new shell — at the top of the strip and focuses it; Ctrl+W closes the
- * active one; Ctrl+PageDown / Ctrl+PageUp step to the next and previous tab.
- * The last workspace is never closed, so the app always has somewhere to be.
+ * plus a new shell — at the right of the strip and focuses it; Ctrl+W closes
+ * the active one; Ctrl+PageDown / Ctrl+PageUp step to the next and previous
+ * tab. The last workspace is never closed, so the app always has somewhere to
+ * be.
  */
 function addWorkspace(): void {
   const workspace = makeWorkspace()
-  workspaces.value = [workspace, ...workspaces.value]
-  activeIndex.value = 0
+  workspaces.value = [...workspaces.value, workspace]
+  activeIndex.value = workspaces.value.length - 1
   void workspace.init()
   void nextTick(() => focusPanes())
 }
 
 function selectWorkspace(index: number): void {
-  if (index === activeIndex.value) return
+  if (index === activeIndex.value) {
+    toggleTerminal()
+    return
+  }
   activeIndex.value = index
   void nextTick(() => focusPanes())
 }
@@ -607,7 +611,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="flex h-full flex-col overflow-hidden bg-bg text-fg select-none">
-    <TitleBar :terminal-open="terminalExpanded" @toggle-terminal="toggleTerminal">
+    <TitleBar>
       <WorkspaceTabs
         :tabs="workspaces"
         :active-index="activeIndex"

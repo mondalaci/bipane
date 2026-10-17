@@ -61,7 +61,7 @@ directory still descends on `F3`), `Insert` marks the current entry and moves do
 right-click marks a row and dragging the held button paints that mark across
 rows, `Ctrl+O` toggles the terminal, `Ctrl+R` re-lists the active pane,
 `Ctrl+T` opens a new terminal — a fresh workspace (two panes at home plus a new
-shell) at the top of the tab strip, focused — `Ctrl+W` closes the active one
+shell) at the right of the tab strip, focused — `Ctrl+W` closes the active one
 (the last workspace is never closed), `Ctrl+PageDown`/`Ctrl+PageUp` step to the
 next/previous workspace, `Ctrl+U` swaps the two panels (each keeps its cursor,
 marks and filter),
@@ -106,13 +106,17 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   bundled Node version instead of the Electron version:
   `env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron .`
 - **The window is frameless** (`frame: false`), so the OS decoration is replaced
-  by `TitleBar.vue` (a single 32px row that holds the terminal toggle, the
-  workspace tabs and the window controls).
+  by `TitleBar.vue` (a single 32px row that holds the logo, the workspace tabs
+  and the window controls; clicking the active tab toggles its terminal).
   Moving the window depends on `-webkit-app-region`: the header is
   `drag-region` and interactive children must be `no-drag`, otherwise a new
   control silently swallows clicks. Both are `@utility` rules in `main.css`.
   Window controls go through `window.bipane.win`; main broadcasts
   `window:maximized-change` so the maximize/restore icon stays in sync.
+  Double-clicking the bar toggles maximize, and it must key off `button`
+  targets, not `no-drag` ones: the tab strip is a `no-drag` `flex-1` child, so
+  a `.no-drag` test would swallow every double-click on the bar's empty middle
+  (only the small logo/drag area would respond).
 - **Incremental search holds DOM focus in its input**, so `handlePaneKey` in
   `App.vue` intentionally lets editing keys through (printable characters,
   Backspace/Delete) and intercepts only navigation keys. Anything added to that

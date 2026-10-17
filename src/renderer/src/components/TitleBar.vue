@@ -1,10 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 
-defineProps<{ terminalOpen: boolean }>()
-
-const emit = defineEmits<{ (event: 'toggle-terminal'): void }>()
-
 const maximized = ref(false)
 let unsubscribe: (() => void) | null = null
 
@@ -34,7 +30,7 @@ function close(): void {
 
 function onDoubleClick(event: MouseEvent): void {
   const target = event.target
-  if (target instanceof HTMLElement && target.closest('.no-drag')) return
+  if (target instanceof HTMLElement && target.closest('button')) return
   toggleMaximize()
 }
 </script>
@@ -57,37 +53,9 @@ function onDoubleClick(event: MouseEvent): void {
         <rect x="2.5" y="4.5" width="19" height="15" rx="2" />
         <path d="M12 4.5v15" />
       </svg>
-      <span class="text-ui font-medium tracking-tight text-fg-bright">Bipane</span>
     </div>
 
-    <div class="no-drag ml-3 shrink-0">
-      <button
-        type="button"
-        class="flex items-center gap-1.5 rounded px-1.5 py-0.5 text-ui-sm transition-colors"
-        :class="
-          terminalOpen ? 'bg-selection text-fg-bright' : 'text-fg-dim hover:bg-hover hover:text-fg'
-        "
-        title="Toggle terminal (Ctrl+O)"
-        @click="emit('toggle-terminal')"
-      >
-        <svg
-          viewBox="0 0 24 24"
-          class="h-3.5 w-3.5"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.8"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
-        >
-          <path d="m3 7 5 5-5 5" />
-          <path d="M12 17h9" />
-        </svg>
-        <span>Terminal</span>
-      </button>
-    </div>
-
-    <div class="no-drag ml-2 flex min-w-0 flex-1 items-center">
+    <div class="no-drag ml-3 flex min-w-0 flex-1 items-center">
       <slot />
     </div>
 

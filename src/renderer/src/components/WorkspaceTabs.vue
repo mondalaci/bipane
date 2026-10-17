@@ -1,10 +1,10 @@
 <script setup lang="ts">
 /**
- * The workspace tab strip, rendered inside the title bar beside the Terminal
- * toggle so it costs no extra vertical space. Each tab is a whole workspace —
- * its own pair of file panes and its own shell — so switching tabs is switching
- * sessions. Ctrl+T / Ctrl+W / Ctrl+PageUp / Ctrl+PageDown mirror the buttons
- * here.
+ * The workspace tab strip, rendered inside the title bar so it costs no extra
+ * vertical space. Each tab is a whole workspace — its own pair of file panes
+ * and its own shell — so switching tabs is switching sessions. Clicking the
+ * active tab toggles its terminal. Ctrl+T / Ctrl+W / Ctrl+PageUp /
+ * Ctrl+PageDown mirror the buttons here.
  */
 defineProps<{ tabs: { id: string; label: string }[]; activeIndex: number }>()
 
