@@ -32,15 +32,21 @@ src/main/ipc/window.ts   IPC: window:minimize/toggle-maximize/close/is-maximized
 src/preload/index.ts     contextBridge -> window.bipane (implements BipaneApi)
 src/shared/types.ts      DirEntry/DirListing/Result/Pty* types (main + renderer)
 src/shared/api.ts        BipaneApi interface (the preload contract)
-src/renderer/src/App.vue global keyboard model, layout, focus, cwd sync
-src/renderer/src/components/TitleBar.vue     frameless title bar + window controls
+src/renderer/src/App.vue global keyboard model, workspace stack, layout, focus
+src/renderer/src/components/TitleBar.vue     frameless title bar + window controls;
+                                             hosts the workspace tab strip
+src/renderer/src/components/WorkspaceTabs.vue the tab strip, rendered inside the
+                                             title bar (select/close/new)
 src/renderer/src/components/FilePanel.vue    one pane: path bar, list, footer
-src/renderer/src/components/TerminalPane.vue xterm over the shared shell: the
-                                             collapsed command line and, when
-                                             expanded, the full terminal
+src/renderer/src/components/TerminalPane.vue xterm over the active workspace's
+                                             shell: the collapsed command line
+                                             and, when expanded, the full terminal
 src/renderer/src/components/FileViewer.vue   Monaco overlay: read-only (F3) or
                                              editable with Ctrl+S (F4)
-src/renderer/src/composables/useShell.ts     the single shared shell session
+src/renderer/src/composables/useWorkspace.ts one tab: its two panes, its shell,
+                                             and the per-workspace cwd sync
+src/renderer/src/composables/useShell.ts     createShell(id): one shell session
+                                             (own process, buffer, cwd, line model)
 src/renderer/src/composables/useDirectory.ts per-pane navigation state + actions
 src/renderer/src/lib/format.ts               size/date/permission formatting
 src/renderer/src/lib/monaco.ts               lazy monaco import + worker wiring
@@ -54,7 +60,11 @@ read-only in the Monaco viewer, `F4` opens it for editing with Ctrl+S to save (a
 directory still descends on `F3`), `Insert` marks the current entry and moves down,
 right-click marks a row and dragging the held button paints that mark across
 rows, `Ctrl+O` toggles the terminal, `Ctrl+R` re-lists the active pane,
-`Ctrl+U` swaps the two panels (each keeps its cursor, marks and filter),
+`Ctrl+T` opens a new terminal — a fresh workspace (two panes at home plus a new
+shell) at the top of the tab strip, focused — `Ctrl+W` closes the active one
+(the last workspace is never closed), `Ctrl+PageDown`/`Ctrl+PageUp` step to the
+next/previous workspace, `Ctrl+U` swaps the two panels (each keeps its cursor,
+marks and filter),
 `Alt+S` starts an incremental search, `F5` copies the marked entries (or the
 cursor row) into the other pane, `F6` moves them there (its destination field
 names a directory to move into, but for a single entry a path that is not a
@@ -64,13 +74,18 @@ cursor row in place, and `F8` deletes them after confirmation.
 `Backspace` never navigates: it belongs to the shell's line
 editor (or the search box), so the `..` row is the way up.
 
-The bottom strip is the shell itself: the same xterm, collapsed to two rows,
-so the prompt, font and echo are the shell's own rather than a look-alike
-widget. `Ctrl+O` expands it into the full terminal, which then owns the
-keyboard outright. While it is collapsed, printable characters go to the shell
-and navigation keys still drive the panels; `Enter` runs the typed line, or
-activates the panel entry when the line is empty. `Backspace` is left alone so
-it edits the line, and reaching the parent is the `..` row's job.
+The app is a stack of workspaces — one tab each, shown in the title bar. A
+workspace owns its own pair of file panes and its own shell, so switching tabs
+switches sessions; only the active workspace is rendered, and a tab that comes
+back replays its session buffer (see `useWorkspace.ts`).
+
+The bottom strip is the active workspace's shell itself: the same xterm,
+collapsed to two rows, so the prompt, font and echo are the shell's own rather
+than a look-alike widget. `Ctrl+O` expands it into the full terminal, which then
+owns the keyboard outright. While it is collapsed, printable characters go to
+the shell and navigation keys still drive the panels; `Enter` runs the typed
+line, or activates the panel entry when the line is empty. `Backspace` is left
+alone so it edits the line, and reaching the parent is the `..` row's job.
 
 ## Gotchas
 
@@ -91,7 +106,8 @@ it edits the line, and reaching the parent is the `..` row's job.
   bundled Node version instead of the Electron version:
   `env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron .`
 - **The window is frameless** (`frame: false`), so the OS decoration is replaced
-  by `TitleBar.vue` (a single 32px row that also holds the terminal toggle).
+  by `TitleBar.vue` (a single 32px row that holds the terminal toggle, the
+  workspace tabs and the window controls).
   Moving the window depends on `-webkit-app-region`: the header is
   `drag-region` and interactive children must be `no-drag`, otherwise a new
   control silently swallows clicks. Both are `@utility` rules in `main.css`.
@@ -107,9 +123,10 @@ it edits the line, and reaching the parent is the `..` row's job.
   and page jumps; `FilePanel` renders that notice as a sibling of the `<ul>`.
 - **The panel and the shell keep their cwd in sync in both directions**, which
   is why it needs a guard: the shell's cwd is *polled* (300ms), so a read can be
-  stale for a moment after we inject a `cd`. `pendingPush` in `App.vue` marks the
-  path we asked for so those stale reads are ignored rather than bouncing the
-  panel back. The injection is also gated on `pty:state` reporting the shell is
+  stale for a moment after we inject a `cd`. `pendingPush` in `useWorkspace.ts`
+  marks the path we asked for so those stale reads are ignored rather than
+  bouncing the panel back. The injection is also gated on `pty:state` reporting
+  the shell is
   at a prompt — writing mid-command feeds the text to whatever is running.
 - **`pty:state` is Linux-only** (`/proc/<pid>/cwd` for the cwd, `tpgid` in
   `/proc/<pid>/stat` to tell whether the shell is at a prompt). Elsewhere it
@@ -153,9 +170,9 @@ it edits the line, and reaching the parent is the `..` row's job.
   corrupting a half-typed command. `consume()` in `App.vue` does both, and that
   listener is registered in setup so it runs ahead of xterm's.
 - **The collapsed strip is the shell, so its input line is state we model.**
-  `useShell.inputLine` is fed from xterm's `onData`. It decides whether `Enter`
-  runs the line or activates the panel entry, and it stops the cwd sync from
-  injecting a `cd` into a half-typed command.
+  `shell.inputLine` (one per workspace) is fed from xterm's `onData`. It decides
+  whether `Enter` runs the line or activates the panel entry, and it stops the
+  cwd sync from injecting a `cd` into a half-typed command.
 - **Panel -> shell cwd sync types a real `cd` into a real prompt**, so the shell
   echoes it and the strip fills with commands the user never issued. The
   injected line carries a trailing `printf '\033[1A\033[2K'` that walks back
@@ -167,12 +184,16 @@ it edits the line, and reaching the parent is the `..` row's job.
   `printf` runs, and `Ctrl+O` then shows a transcript of them. `refit()` in
   `TerminalPane` therefore clamps the terminal to at least two rows and the
   collapsed strip is sized (`basis-11`) to show both.
-- **The shell is app-level; the terminal view does not own it.** `TerminalPane`
-  must not kill it on unmount — main reaps sessions when the window goes away.
-  Killing it there let any remount (a Vue HMR update, a reload) race a fresh
-  spawn and take the *new* shell down with it, since the session id is a
-  constant. For the same reason `attachTerminal` does not drain the output
-  buffer: a view that attaches later replays the session so far.
+- **The shell outlives its view; the terminal view does not own it.**
+  `TerminalPane` must not kill it on unmount — main reaps sessions when the
+  window goes away, and a workspace kills its own session only through
+  `shell.dispose()` when its tab is closed. Killing it on unmount let any
+  remount (a Vue HMR update, a workspace switch, a reload) race a fresh spawn
+  and take the *new* shell down with it. For the same reason `attachTerminal`
+  does not drain the output buffer: a view that attaches later replays the
+  session so far. A workspace object (`createWorkspace`) survives tab switches,
+  so its shell's `startPromise`, buffer and cwd are preserved and remounting
+  the view re-attaches rather than respawns.
 - **The viewer is a modal overlay over the panes and terminal.** `App.vue`
   renders `FileViewer` absolutely inside a `relative` wrapper that holds `main`
   and `TerminalPane`, so the title and status bars stay visible. While a file is
@@ -249,12 +270,14 @@ conclusion at least once, so treat them as required steps.
   - `xdotool` clicks land on whatever window is stacked under the pointer, so
     raise and activate first. `Input.dispatchMouseEvent` respects hit-testing
     (drag regions included) and is the reliable option.
-- **`window.bipane.pty.state('main')` is the fastest health check.** A live
+- **`window.bipane.pty.state('ws-1')` is the fastest health check.** A live
   shell reports a `cwd`; `cwd: null` means the session has exited, so any typing
-  afterwards proves nothing.
-- **A dev-mode HMR update of `App.vue` or `TerminalPane.vue` remounts the
-  terminal view.** That is harmless now (the shell survives and the buffer
-  replays), but it does mean a running shell can look "reset" mid-test.
+  afterwards proves nothing. Workspace sessions are `ws-1`, `ws-2`, ... in
+  creation order.
+- **A dev-mode HMR update of `App.vue` or `TerminalPane.vue`, and switching
+  workspaces, remount the terminal view.** That is harmless (the shell survives
+  and the buffer replays), but it does mean a running shell can look "reset"
+  mid-test.
 
 ## Conventions
 

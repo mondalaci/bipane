@@ -1,192 +1,229 @@
-import { ref } from 'vue'
+import { ref, type Ref } from 'vue'
 
 /**
- * The whole app shares a single shell session. The command line writes into it
- * and the Ctrl+O terminal renders it, so Enter on the command line is a real
- * Enter and everything stateful (cwd, history, pipes) works for free.
+ * One shell session. A workspace owns exactly one, so the app can run several
+ * at once: each instance keeps its own shell process, output buffer, cwd and
+ * command-line model, and `TerminalPane` renders whichever one is active.
+ *
+ * The command line writes into the session and the Ctrl+O terminal renders it,
+ * so Enter on the command line is a real Enter and everything stateful (cwd,
+ * history, pipes) works for free.
  */
-const SESSION_ID = 'main'
 const POLL_INTERVAL_MS = 300
 const MAX_BUFFER_LENGTH = 200_000
 
-const started = ref(false)
-const cwd = ref<string | null>(null)
-const idle = ref(false)
-/**
- * What the shell's input line currently holds. We model it from the bytes
- * xterm sends, because the command line *is* the shell: the alternative is
- * poking at the terminal buffer, which cannot tell where the prompt ends.
- * Only emptiness matters, so a simple append/backspace model stays accurate
- * even when readline's own caret moves behind our back.
- */
-const inputLine = ref('')
+export interface Shell {
+  readonly id: string
+  readonly started: Ref<boolean>
+  readonly cwd: Ref<string | null>
+  readonly idle: Ref<boolean>
+  /**
+   * What the shell's input line currently holds. We model it from the bytes
+   * xterm sends, because the command line *is* the shell: the alternative is
+   * poking at the terminal buffer, which cannot tell where the prompt ends.
+   * Only emptiness matters, so a simple append/backspace model stays accurate
+   * even when readline's own caret moves behind our back.
+   */
+  readonly inputLine: Ref<string>
+  /**
+   * Incremented whenever the user submits a non-empty line, i.e. the shell is
+   * about to run a command. Panels listen to it to re-list their directory once
+   * that command finishes, since a command need not change the cwd.
+   */
+  readonly commandSeq: Ref<number>
+  ensureStarted(spawnCwd: string, cols: number, rows: number): Promise<void>
+  write(data: string): void
+  /** Sends input we originate, keeping the line model in step. */
+  sendInput(data: string): void
+  clearInputLine(): void
+  noteInput(data: string): void
+  refreshState(): Promise<void>
+  resize(cols: number, rows: number): void
+  attachTerminal(
+    onData: (data: string) => void,
+    onExit: (code: number) => void
+  ): { initial: string; detach: () => void }
+  /** Stop polling and kill the underlying process (Ctrl+W on the workspace). */
+  dispose(): void
+}
 
-/**
- * Incremented whenever the user submits a non-empty line, i.e. the shell is
- * about to run a command. Panels listen to it to re-list their directory once
- * that command finishes, since a command need not change the cwd.
- */
-const commandSeq = ref(0)
+export function createShell(id: string): Shell {
+  const started = ref(false)
+  const cwd = ref<string | null>(null)
+  const idle = ref(false)
+  const inputLine = ref('')
+  const commandSeq = ref(0)
 
-let lineBuffer = ''
+  let lineBuffer = ''
 
-const dataListeners = new Set<(data: string) => void>()
-const exitListeners = new Set<(code: number) => void>()
+  const dataListeners = new Set<(data: string) => void>()
+  const exitListeners = new Set<(code: number) => void>()
 
-let buffer = ''
-let pollTimer: number | null = null
-let startPromise: Promise<void> | null = null
+  let buffer = ''
+  let pollTimer: number | null = null
+  let startPromise: Promise<void> | null = null
 
-function handleData(data: string): void {
-  // Retain recent output so a terminal opened later can replay it instead of
-  // showing an empty screen.
-  buffer += data
-  if (buffer.length > MAX_BUFFER_LENGTH) {
-    buffer = buffer.slice(buffer.length - MAX_BUFFER_LENGTH)
+  function handleData(data: string): void {
+    // Retain recent output so a terminal opened later can replay it instead of
+    // showing an empty screen.
+    buffer += data
+    if (buffer.length > MAX_BUFFER_LENGTH) {
+      buffer = buffer.slice(buffer.length - MAX_BUFFER_LENGTH)
+    }
+    for (const listener of dataListeners) listener(data)
   }
-  for (const listener of dataListeners) listener(data)
-}
 
-async function refreshState(): Promise<void> {
-  if (!started.value) return
+  async function refreshState(): Promise<void> {
+    if (!started.value) return
 
-  const snapshot = await window.bipane.pty.state(SESSION_ID)
-  idle.value = snapshot.idle
-  if (snapshot.cwd && snapshot.cwd !== cwd.value) cwd.value = snapshot.cwd
-}
+    const snapshot = await window.bipane.pty.state(id)
+    idle.value = snapshot.idle
+    if (snapshot.cwd && snapshot.cwd !== cwd.value) cwd.value = snapshot.cwd
+  }
 
-function beginPolling(): void {
-  if (pollTimer !== null) return
-  pollTimer = window.setInterval(() => {
-    void refreshState()
-  }, POLL_INTERVAL_MS)
-}
+  function beginPolling(): void {
+    if (pollTimer !== null) return
+    pollTimer = window.setInterval(() => {
+      void refreshState()
+    }, POLL_INTERVAL_MS)
+  }
 
-function stopPolling(): void {
-  if (pollTimer === null) return
-  window.clearInterval(pollTimer)
-  pollTimer = null
-}
+  function stopPolling(): void {
+    if (pollTimer === null) return
+    window.clearInterval(pollTimer)
+    pollTimer = null
+  }
 
-function teardown(): void {
-  stopPolling()
-  startPromise = null
-  started.value = false
-  idle.value = false
-}
+  function teardown(): void {
+    stopPolling()
+    startPromise = null
+    started.value = false
+    idle.value = false
+  }
 
-export function ensureStarted(spawnCwd: string, cols: number, rows: number): Promise<void> {
-  if (startPromise) return startPromise
+  function ensureStarted(spawnCwd: string, cols: number, rows: number): Promise<void> {
+    if (startPromise) return startPromise
 
-  const created = window.bipane.pty.create(SESSION_ID, {
-    cwd: spawnCwd,
-    cols: Math.max(cols, 2),
-    rows: Math.max(rows, 1)
-  })
+    const created = window.bipane.pty.create(id, {
+      cwd: spawnCwd,
+      cols: Math.max(cols, 2),
+      rows: Math.max(rows, 1)
+    })
 
-  let cancelled = false
+    let cancelled = false
 
-  const onDataDisposer = window.bipane.pty.onData((event) => {
-    if (event.id === SESSION_ID) handleData(event.data)
-  })
+    const onDataDisposer = window.bipane.pty.onData((event) => {
+      if (event.id === id) handleData(event.data)
+    })
 
-  const onExitDisposer = window.bipane.pty.onExit((event) => {
-    if (event.id !== SESSION_ID) return
-    if (cancelled) return
-    for (const listener of exitListeners) listener(event.exitCode)
-    dispose()
-    teardown()
-  })
+    const onExitDisposer = window.bipane.pty.onExit((event) => {
+      if (event.id !== id) return
+      if (cancelled) return
+      for (const listener of exitListeners) listener(event.exitCode)
+      stopListening()
+      teardown()
+    })
+
+    function stopListening(): void {
+      cancelled = true
+      onDataDisposer()
+      onExitDisposer()
+    }
+
+    startPromise = created.then(() => {
+      if (cancelled) return
+      started.value = true
+      cwd.value = spawnCwd
+      beginPolling()
+    })
+
+    return startPromise
+  }
+
+  function write(data: string): void {
+    if (!started.value) return
+    window.bipane.pty.write(id, data)
+  }
+
+  function noteInput(data: string): void {
+    for (const char of data) {
+      const code = char.codePointAt(0) ?? 0
+
+      if (code === 13 || code === 10) {
+        // Enter: a non-empty line is a command the shell is about to run, not
+        // just an empty prompt line, so it is worth re-listing for.
+        if (lineBuffer.length > 0) commandSeq.value++
+        lineBuffer = ''
+        continue
+      }
+      if (code === 3 || code === 21) {
+        lineBuffer = ''
+        continue
+      }
+      if (code === 127 || code === 8) {
+        lineBuffer = lineBuffer.slice(0, -1)
+        continue
+      }
+      if (code === 23) {
+        lineBuffer = lineBuffer.replace(/\s*\S*$/, '')
+        continue
+      }
+      if (code === 27) break
+      if (code < 32) continue
+      lineBuffer += char
+    }
+
+    inputLine.value = lineBuffer
+  }
+
+  function sendInput(data: string): void {
+    noteInput(data)
+    write(data)
+  }
+
+  function clearInputLine(): void {
+    sendInput('\u0015')
+  }
+
+  function resize(cols: number, rows: number): void {
+    if (!started.value) return
+    window.bipane.pty.resize(id, cols, rows)
+  }
+
+  function attachTerminal(
+    onData: (data: string) => void,
+    onExit: (code: number) => void
+  ): { initial: string; detach: () => void } {
+    // The buffer is not drained: a terminal that attaches later — or re-attaches
+    // after a reload — replays the session so far instead of showing a blank
+    // screen. It is a bounded rolling window, not the full scrollback.
+    const initial = buffer
+    dataListeners.add(onData)
+    exitListeners.add(onExit)
+
+    return {
+      initial,
+      detach: () => {
+        dataListeners.delete(onData)
+        exitListeners.delete(onExit)
+      }
+    }
+  }
 
   function dispose(): void {
-    cancelled = true
-    onDataDisposer()
-    onExitDisposer()
+    stopPolling()
+    dataListeners.clear()
+    exitListeners.clear()
+    startPromise = null
+    started.value = false
+    idle.value = false
+    // Main reaps sessions when the window goes away, so this only needs to
+    // cover a workspace the user closed while the app keeps running.
+    window.bipane.pty.kill(id)
   }
-
-  startPromise = created.then(() => {
-    if (cancelled) return
-    started.value = true
-    cwd.value = spawnCwd
-    beginPolling()
-  })
-
-  return startPromise
-}
-
-export function write(data: string): void {
-  if (!started.value) return
-  window.bipane.pty.write(SESSION_ID, data)
-}
-
-function noteInput(data: string): void {
-  for (const char of data) {
-    const code = char.codePointAt(0) ?? 0
-
-    if (code === 13 || code === 10) {
-      // Enter: a non-empty line is a command the shell is about to run, not
-      // just an empty prompt line, so it is worth re-listing for.
-      if (lineBuffer.length > 0) commandSeq.value++
-      lineBuffer = ''
-      continue
-    }
-    if (code === 3 || code === 21) {
-      lineBuffer = ''
-      continue
-    }
-    if (code === 127 || code === 8) {
-      lineBuffer = lineBuffer.slice(0, -1)
-      continue
-    }
-    if (code === 23) {
-      lineBuffer = lineBuffer.replace(/\s*\S*$/, '')
-      continue
-    }
-    if (code === 27) break
-    if (code < 32) continue
-    lineBuffer += char
-  }
-
-  inputLine.value = lineBuffer
-}
-
-/** Sends input we originate, keeping the line model in step. */
-export function sendInput(data: string): void {
-  noteInput(data)
-  write(data)
-}
-
-export function clearInputLine(): void {
-  sendInput('\u0015')
-}
-
-export function resize(cols: number, rows: number): void {
-  if (!started.value) return
-  window.bipane.pty.resize(SESSION_ID, cols, rows)
-}
-
-export function attachTerminal(
-  onData: (data: string) => void,
-  onExit: (code: number) => void
-): { initial: string; detach: () => void } {
-  // The buffer is not drained: a terminal that attaches later — or re-attaches
-  // after a reload — replays the session so far instead of showing a blank
-  // screen. It is a bounded rolling window, not the full scrollback.
-  const initial = buffer
-  dataListeners.add(onData)
-  exitListeners.add(onExit)
 
   return {
-    initial,
-    detach: () => {
-      dataListeners.delete(onData)
-      exitListeners.delete(onExit)
-    }
-  }
-}
-
-export function useShell() {
-  return {
+    id,
     started,
     cwd,
     idle,
@@ -199,6 +236,7 @@ export function useShell() {
     noteInput,
     refreshState,
     resize,
-    attachTerminal
+    attachTerminal,
+    dispose
   }
 }

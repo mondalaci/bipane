@@ -87,7 +87,9 @@ function onDoubleClick(event: MouseEvent): void {
       </button>
     </div>
 
-    <div class="min-w-0 flex-1"></div>
+    <div class="no-drag ml-2 flex min-w-0 flex-1 items-center">
+      <slot />
+    </div>
 
     <div class="no-drag flex h-full shrink-0 items-stretch gap-1">
       <button

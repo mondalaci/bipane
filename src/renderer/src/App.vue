@@ -4,34 +4,49 @@ import FilePanel from '@renderer/components/FilePanel.vue'
 import ConfirmTransfer from '@renderer/components/ConfirmTransfer.vue'
 import ConfirmDelete from '@renderer/components/ConfirmDelete.vue'
 import TerminalPane from '@renderer/components/TerminalPane.vue'
+import WorkspaceTabs from '@renderer/components/WorkspaceTabs.vue'
 import TitleBar from '@renderer/components/TitleBar.vue'
 import FileViewer from '@renderer/components/FileViewer.vue'
-import { useDirectory, type PaneController, type PaneEntry } from '@renderer/composables/useDirectory'
-import { useShell } from '@renderer/composables/useShell'
+import { createWorkspace, type Workspace } from '@renderer/composables/useWorkspace'
+import type { PaneController, PaneEntry } from '@renderer/composables/useDirectory'
 import type { PanelSide } from '@shared/types'
 
 /**
- * The controller each column renders. They are refs rather than constants
- * because Ctrl+U exchanges them: swapping the controllers moves each directory
- * together with its cursor, marks and filter and needs no re-listing, and it
- * leaves `activeSide` meaningful as a physical column, so the pane that was
- * active stays under the user's cursor.
+ * The app is a stack of workspaces — one tab each. A workspace owns its own
+ * pair of file panes and its own shell, so switching tabs switches sessions
+ * rather than just moving the cursor. Only the active workspace is rendered;
+ * the others keep their state in their controllers and shells, and their
+ * terminal view is recreated (replaying the session buffer) when they come
+ * back, exactly as a reload does.
  */
-const left = shallowRef<PaneController>(useDirectory('left'))
-const right = shallowRef<PaneController>(useDirectory('right'))
+let workspaceSeq = 0
 
-const shell = useShell()
-const shellCwd = shell.cwd
-const shellIdle = shell.idle
-const shellStarted = shell.started
-const shellInput = shell.inputLine
-const shellCommand = shell.commandSeq
+function makeWorkspace(): Workspace {
+  workspaceSeq += 1
+  return createWorkspace(`ws-${workspaceSeq}`, `Terminal ${workspaceSeq}`)
+}
 
-const activeSide = ref<PanelSide>('left')
-const terminalExpanded = ref(false)
-const terminalFocused = ref(false)
-const panelHost = ref<HTMLElement | null>(null)
-const terminalRef = ref<InstanceType<typeof TerminalPane> | null>(null)
+const workspaces = shallowRef<Workspace[]>([makeWorkspace()])
+const activeIndex = ref(0)
+
+const activeWorkspace = computed(() => workspaces.value[activeIndex.value] ?? workspaces.value[0]!)
+
+/**
+ * The active workspace's bindings, surfaced as plain computeds so the rest of
+ * the component (and the template) reads them the way the old single-workspace
+ * code did. They re-evaluate when the active workspace, or one of its refs,
+ * changes — a Ctrl+U swap inside a workspace included.
+ */
+const left = computed(() => activeWorkspace.value.left.value)
+const right = computed(() => activeWorkspace.value.right.value)
+const activeSide = computed(() => activeWorkspace.value.activeSide.value)
+const activePane = computed(() => activeWorkspace.value.activePane.value)
+const inactivePane = computed(() => activeWorkspace.value.inactivePane.value)
+const activePanePath = computed(() => activeWorkspace.value.activePanePath.value)
+const terminalExpanded = computed(() => activeWorkspace.value.terminalExpanded.value)
+const terminalFocused = computed(() => activeWorkspace.value.terminalFocused.value)
+const shell = computed(() => activeWorkspace.value.shell)
+const shellInput = computed(() => shell.value.inputLine.value)
 
 /**
  * The file shown in the Monaco viewer, or null when it is closed. The viewer is
@@ -63,37 +78,19 @@ const copyJob = ref<{ entries: PaneEntry[]; destination: string } | null>(null)
  */
 const moveJob = ref<{ entries: PaneEntry[]; destination: string } | null>(null)
 
-const activePane = computed(() => (activeSide.value === 'left' ? left.value : right.value))
-const inactivePane = computed(() => (activeSide.value === 'left' ? right.value : left.value))
-const activePanePath = computed(() => activePane.value.state.path)
-
-function shellQuote(value: string): string {
-  return "'" + value.replaceAll("'", "'\\''") + "'"
-}
-
-/**
- * Panel -> shell cwd sync has to type a real `cd` into a real prompt, so the
- * shell echoes it and the strip fills up with commands the user never issued.
- * Appending a printf that walks back over the echoed line and clears it hides
- * the sync, and `&&` means a failed `cd` still shows its error.
- */
-const ERASE_ECHO = "printf '\\033[1A\\033[2K'"
+const panelHost = ref<HTMLElement | null>(null)
+const terminalRef = ref<InstanceType<typeof TerminalPane> | null>(null)
 
 function setActive(side: PanelSide): void {
-  activeSide.value = side
+  activeWorkspace.value.activeSide.value = side
 }
 
-/**
- * Ctrl+U exchanges the two panels. The swap is a rebinding, not a re-listing:
- * each controller keeps its directory, cursor, marks and filter, and they simply
- * trade columns. `activeSide` is flipped with them so the active pane follows its
- * directory to the other column rather than the highlight staying put.
- */
 function swapPanels(): void {
-  const previous = left.value
-  left.value = right.value
-  right.value = previous
-  setActive(activeSide.value === 'left' ? 'right' : 'left')
+  activeWorkspace.value.swapPanels()
+}
+
+function setTerminalFocused(value: boolean): void {
+  activeWorkspace.value.terminalFocused.value = value
 }
 
 /**
@@ -152,11 +149,11 @@ function toggleTerminal(): void {
     collapseTerminal()
     return
   }
-  terminalExpanded.value = true
+  activeWorkspace.value.terminalExpanded.value = true
 }
 
 function collapseTerminal(): void {
-  terminalExpanded.value = false
+  activeWorkspace.value.terminalExpanded.value = false
   void nextTick(() => terminalRef.value?.focusTerminal())
 }
 
@@ -164,6 +161,48 @@ function toggleSearch(): void {
   const pane = activePane.value
   if (pane.state.searchActive) pane.closeSearch()
   else pane.openSearch()
+}
+
+/**
+ * Workspace tabs. Ctrl+T opens a new terminal — a fresh pair of panes at home
+ * plus a new shell — at the top of the strip and focuses it; Ctrl+W closes the
+ * active one; Ctrl+PageDown / Ctrl+PageUp step to the next and previous tab.
+ * The last workspace is never closed, so the app always has somewhere to be.
+ */
+function addWorkspace(): void {
+  const workspace = makeWorkspace()
+  workspaces.value = [workspace, ...workspaces.value]
+  activeIndex.value = 0
+  void workspace.init()
+  void nextTick(() => focusPanes())
+}
+
+function selectWorkspace(index: number): void {
+  if (index === activeIndex.value) return
+  activeIndex.value = index
+  void nextTick(() => focusPanes())
+}
+
+function closeWorkspace(index: number): void {
+  if (workspaces.value.length <= 1) return
+  const workspace = workspaces.value[index]
+  if (!workspace) return
+
+  const next = workspaces.value.filter((_, i) => i !== index)
+  workspaces.value = next
+
+  if (index < activeIndex.value) activeIndex.value -= 1
+  else if (index === activeIndex.value) activeIndex.value = Math.min(index, next.length - 1)
+
+  workspace.dispose()
+  void nextTick(() => focusPanes())
+}
+
+function switchWorkspace(delta: number): void {
+  const count = workspaces.value.length
+  if (count <= 1) return
+  activeIndex.value = (activeIndex.value + delta + count) % count
+  void nextTick(() => focusPanes())
 }
 
 /**
@@ -290,12 +329,6 @@ async function confirmMove(destination: string): Promise<void> {
   focusPanes()
 }
 
-// A filter belongs to the pane it was typed in.
-watch(activeSide, (side) => {
-  const inactive = side === 'left' ? right.value : left.value
-  inactive.closeSearch()
-})
-
 watch(
   () => left.value.state.searchActive || right.value.state.searchActive,
   (anyActive, wasActive) => {
@@ -303,139 +336,6 @@ watch(
     if (!terminalExpanded.value) terminalRef.value?.focusTerminal()
   }
 )
-
-/**
- * cwd sync runs both ways, which needs care: the shell's cwd is polled, so a
- * read can be stale for a moment after we push a `cd`. `pendingPush` marks the
- * path we asked for so those stale reads are ignored instead of bouncing the
- * panel back to where it came from.
- */
-let pendingPush: string | null = null
-let pendingTimer: number | null = null
-
-function clearPendingPush(): void {
-  pendingPush = null
-  if (pendingTimer === null) return
-  window.clearTimeout(pendingTimer)
-  pendingTimer = null
-}
-
-function pushCwdToShell(): void {
-  // Never write into a shell that is busy, or into a half-typed command line:
-  // the text would be fed to whatever is running, or appended to the command.
-  if (!shellStarted.value || !shellIdle.value) return
-  if (shellInput.value.length > 0) return
-
-  const target = activePanePath.value
-  if (!target || target === shellCwd.value || target === pendingPush) return
-
-  pendingPush = target
-  if (pendingTimer !== null) window.clearTimeout(pendingTimer)
-  pendingTimer = window.setTimeout(clearPendingPush, 3000)
-
-  shell.write(`cd ${shellQuote(target)} && ${ERASE_ECHO}\r`)
-}
-
-watch([activePanePath, shellIdle, shellStarted, shellInput], pushCwdToShell)
-
-watch(shellCwd, (next) => {
-  if (!next) return
-
-  if (pendingPush !== null) {
-    if (next === pendingPush) clearPendingPush()
-    return
-  }
-
-  if (next === activePanePath.value) return
-  void activePane.value.navigateTo(next)
-})
-
-/**
- * A command can add or remove entries without changing the cwd, which is the
- * only thing the panel otherwise reacts to — so `touch newfile` leaves the list
- * stale until the directory is re-entered. Re-list the pane the shell ran in
- * once the command finishes.
- *
- * The tricky part is noticing "finished": a fast command is over before the
- * next 300ms state poll, so it never shows up as busy and there is no idle
- * transition to wait for. After a short settle we therefore force a fresh read
- * and treat "already idle" as a completed command; a command still running
- * shows up busy here and the idle watch finishes the job when it exits.
- */
-const COMMAND_SETTLE_MS = 150
-
-let commandPending = false
-let commandSettleTimer: number | null = null
-
-function refreshPanelsAtShellCwd(): void {
-  const target = shellCwd.value
-  if (!target) return
-  for (const pane of [left.value, right.value]) {
-    if (pane.state.path === target) void pane.refresh()
-  }
-}
-
-/**
- * A command typed at the prompt is a change the user asked for, so the panes
- * showing the shell's directory are marked as making it themselves: `mkdir foo`
- * would otherwise sweep `foo` exactly like a file another program wrote. They
- * stay quiet while the command runs and for a short tail after it, which also
- * covers the watcher's delayed notification for the same change. This is only
- * ever the directories the shell is actually in — a download finishing
- * elsewhere still sweeps.
- */
-const shellPanes = new Set<PaneController>()
-
-function muteShellPanes(): void {
-  const dir = shellCwd.value
-  if (!dir) return
-  for (const pane of [left.value, right.value]) {
-    if (pane.state.path !== dir || shellPanes.has(pane)) continue
-    shellPanes.add(pane)
-    pane.beginSelfChange()
-  }
-}
-
-function unmuteShellPanes(): void {
-  for (const pane of shellPanes) pane.endSelfChange()
-  shellPanes.clear()
-}
-
-function noteCommandSubmitted(): void {
-  commandPending = true
-  muteShellPanes()
-  if (commandSettleTimer !== null) window.clearTimeout(commandSettleTimer)
-  commandSettleTimer = window.setTimeout(() => {
-    commandSettleTimer = null
-    void settleCommand()
-  }, COMMAND_SETTLE_MS)
-}
-
-async function settleCommand(): Promise<void> {
-  if (!commandPending) return
-  await shell.refreshState()
-  if (!commandPending || !shellIdle.value) return
-  commandPending = false
-  unmuteShellPanes()
-  refreshPanelsAtShellCwd()
-}
-
-watch(shellCommand, noteCommandSubmitted)
-
-watch(shellIdle, (idleNow) => {
-  if (!idleNow || !commandPending) return
-  commandPending = false
-  unmuteShellPanes()
-  refreshPanelsAtShellCwd()
-})
-
-// A shell that dies mid-command never reaches idle, so nothing else would
-// release the muting. Resuming on exit keeps the sweep working afterwards.
-watch(shellStarted, (started) => {
-  if (started) return
-  commandPending = false
-  unmuteShellPanes()
-})
 
 /**
  * Claim a key for the app. `preventDefault` is not enough on its own: xterm
@@ -446,6 +346,10 @@ watch(shellStarted, (started) => {
 function consume(event: KeyboardEvent): void {
   event.preventDefault()
   event.stopPropagation()
+}
+
+function isPlainCtrl(event: KeyboardEvent): boolean {
+  return event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey
 }
 
 function handlePaneKey(event: KeyboardEvent): void {
@@ -489,7 +393,7 @@ function handlePaneKey(event: KeyboardEvent): void {
       return
     }
     if (hasInput) {
-      shell.clearInputLine()
+      shell.value.clearInputLine()
       return
     }
     if (terminalExpanded.value) collapseTerminal()
@@ -644,6 +548,32 @@ function onKeydown(event: KeyboardEvent): void {
     return
   }
 
+  // Workspace tabs are claimed globally, like Ctrl+O and Ctrl+R, so they manage
+  // tabs even while the expanded terminal owns the keyboard.
+  if (isPlainCtrl(event)) {
+    const key = event.key.toLowerCase()
+    if (key === 't') {
+      consume(event)
+      addWorkspace()
+      return
+    }
+    if (key === 'w') {
+      consume(event)
+      closeWorkspace(activeIndex.value)
+      return
+    }
+    if (event.key === 'PageDown') {
+      consume(event)
+      switchWorkspace(1)
+      return
+    }
+    if (event.key === 'PageUp') {
+      consume(event)
+      switchWorkspace(-1)
+      return
+    }
+  }
+
   // Expanded and focused means it is a real terminal: it owns the keyboard.
   if (terminalExpanded.value && terminalFocused.value) return
 
@@ -664,21 +594,28 @@ window.addEventListener('focus', restoreFocus)
 document.addEventListener('focusout', onFocusDrop)
 
 onMounted(() => {
-  void left.value.init()
-  void right.value.init()
+  for (const workspace of workspaces.value) void workspace.init()
 })
 
 onBeforeUnmount(() => {
-  if (commandSettleTimer !== null) window.clearTimeout(commandSettleTimer)
   window.removeEventListener('keydown', onKeydown, { capture: true })
   window.removeEventListener('focus', restoreFocus)
   document.removeEventListener('focusout', onFocusDrop)
+  for (const workspace of workspaces.value) workspace.dispose()
 })
 </script>
 
 <template>
   <div class="flex h-full flex-col overflow-hidden bg-bg text-fg select-none">
-    <TitleBar :terminal-open="terminalExpanded" @toggle-terminal="toggleTerminal" />
+    <TitleBar :terminal-open="terminalExpanded" @toggle-terminal="toggleTerminal">
+      <WorkspaceTabs
+        :tabs="workspaces"
+        :active-index="activeIndex"
+        @select="selectWorkspace"
+        @close="closeWorkspace"
+        @create="addWorkspace"
+      />
+    </TitleBar>
 
     <!-- The wrapper is the positioning context for the viewer overlay, which
          covers the panes and the terminal but leaves the title bar visible.
@@ -691,6 +628,7 @@ onBeforeUnmount(() => {
         :class="terminalExpanded ? 'grow-0' : 'grow'"
       >
         <FilePanel
+          :key="`${activeWorkspace.id}:left`"
           :controller="left"
           :active="activeSide === 'left'"
           @select="setActive('left')"
@@ -698,6 +636,7 @@ onBeforeUnmount(() => {
         />
         <div class="w-px shrink-0 bg-border"></div>
         <FilePanel
+          :key="`${activeWorkspace.id}:right`"
           :controller="right"
           :active="activeSide === 'right'"
           @select="setActive('right')"
@@ -707,9 +646,11 @@ onBeforeUnmount(() => {
 
       <TerminalPane
         ref="terminalRef"
+        :key="activeWorkspace.id"
+        :shell="activeWorkspace.shell"
         :expanded="terminalExpanded"
         :cwd="activePanePath"
-        @focused-change="terminalFocused = $event"
+        @focused-change="setTerminalFocused"
         @collapse="collapseTerminal"
       />
 

@@ -2,7 +2,7 @@
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
-import { useShell } from '@renderer/composables/useShell'
+import type { Shell } from '@renderer/composables/useShell'
 
 // Read the mono stack from the theme rather than repeating it, so the terminal
 // and the rest of the UI cannot drift apart (or fall out of sync when the theme
@@ -14,14 +14,15 @@ function monoFontStack(): string {
   return value || 'monospace'
 }
 
-const props = defineProps<{ expanded: boolean; cwd: string }>()
+// `shell` is the workspace's session. The view does not own it — it detaches on
+// unmount and lets the workspace decide when the process dies — so switching
+// workspaces simply renders a different session.
+const props = defineProps<{ expanded: boolean; cwd: string; shell: Shell }>()
 
 const emit = defineEmits<{
   (event: 'focused-change', value: boolean): void
   (event: 'collapse'): void
 }>()
-
-const shell = useShell()
 
 const root = ref<HTMLElement | null>(null)
 const host = ref<HTMLElement | null>(null)
@@ -47,7 +48,7 @@ function refit(): void {
   // both sized for (basis-11) and clamped to two rows here.
   const rows = Math.max(term.rows, 2)
   if (rows !== term.rows) term.resize(term.cols, rows)
-  shell.resize(term.cols, rows)
+  props.shell.resize(term.cols, rows)
 }
 
 function scheduleRefit(): void {
@@ -102,8 +103,8 @@ function startTerminal(): void {
   refit()
 
   term.onData((data) => {
-    shell.noteInput(data)
-    shell.write(data)
+    props.shell.noteInput(data)
+    props.shell.write(data)
   })
 
   term.attachCustomKeyEventHandler((event) => {
@@ -116,14 +117,14 @@ function startTerminal(): void {
     return !isTerminalToggle
   })
 
-  const attached = shell.attachTerminal(
+  const attached = props.shell.attachTerminal(
     (data) => term?.write(data),
     (code) => term?.write(`\r\n\x1b[90m[process exited with code ${code}]\x1b[0m\r\n`)
   )
   detach = attached.detach
   if (attached.initial) term.write(attached.initial)
 
-  void shell.ensureStarted(props.cwd, term.cols, term.rows).then(() => {
+  void props.shell.ensureStarted(props.cwd, term.cols, term.rows).then(() => {
     refit()
     scheduleRefit()
   })
