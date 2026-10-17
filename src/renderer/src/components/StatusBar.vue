@@ -48,6 +48,8 @@ const selectedCount = computed(() => props.pane.selectedCount())
         <span>open</span>
         <kbd class="rounded border border-border bg-bg-alt px-1 font-mono text-2xs">Ins</kbd>
         <span>select</span>
+        <kbd class="rounded border border-border bg-bg-alt px-1 font-mono text-2xs">F8</kbd>
+        <span>delete</span>
         <kbd class="rounded border border-border bg-bg-alt px-1 font-mono text-2xs">Alt+S</kbd>
         <span>find</span>
         <kbd class="rounded border border-border bg-bg-alt px-1 font-mono text-2xs">Ctrl+O</kbd>

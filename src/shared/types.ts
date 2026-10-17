@@ -33,6 +33,20 @@ export interface FsError {
 
 export type Result<T> = { ok: true; data: T } | { ok: false; error: FsError }
 
+export interface DeleteFailure {
+  path: string
+  error: FsError
+}
+
+/**
+ * Deleting a set of paths is best-effort: one unwritable entry must not abort
+ * the rest, so the call reports what went through and what did not.
+ */
+export interface DeleteOutcome {
+  deleted: string[]
+  failed: DeleteFailure[]
+}
+
 export interface PtySpawnOptions {
   cwd: string
   cols: number

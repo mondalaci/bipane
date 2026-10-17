@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import type { BipaneApi } from '@shared/api'
 import type {
+  DeleteOutcome,
   DirListing,
   PtyDataEvent,
   PtyExitEvent,
@@ -13,7 +14,9 @@ const api: BipaneApi = {
     home: () => ipcRenderer.invoke('fs:home'),
     list: (dir: string): Promise<Result<DirListing>> => ipcRenderer.invoke('fs:list', dir),
     open: (target: string) => ipcRenderer.invoke('fs:open', target),
-    reveal: (target: string) => ipcRenderer.invoke('fs:reveal', target)
+    reveal: (target: string) => ipcRenderer.invoke('fs:reveal', target),
+    remove: (targets: string[]): Promise<Result<DeleteOutcome>> =>
+      ipcRenderer.invoke('fs:delete', targets)
   },
   pty: {
     create: (id: string, options: PtySpawnOptions) =>

@@ -38,6 +38,8 @@ export interface PaneController {
   setSelected(path: string, value: boolean): void
   toggleSelection(): void
   clearSelection(): void
+  deletionTargets(): PaneEntry[]
+  deleteEntries(): Promise<void>
   openSearch(): void
   updateSearch(query: string): void
   closeSearch(): void
@@ -279,6 +281,40 @@ export function useDirectory(side: PanelSide): PaneController {
     state.selected.clear()
   }
 
+  /**
+   * What F8 would remove: the marks if any are set, otherwise the entry under
+   * the cursor. The ".." row is never a target, and a filter does not hide a
+   * mark — every mark in the pane is deleted, matched in listing order.
+   */
+  function deletionTargets(): PaneEntry[] {
+    if (state.selected.size > 0) {
+      return state.allRows.filter((row) => !row.isParent && state.selected.has(row.path))
+    }
+    const entry = current()
+    return entry && !entry.isParent ? [entry] : []
+  }
+
+  async function deleteEntries(): Promise<void> {
+    const targets = deletionTargets()
+    if (targets.length === 0) return
+
+    const result = await window.bipane.fs.remove(targets.map((target) => target.path))
+    if (!result.ok) {
+      state.error = `${result.error.code}: ${result.error.message}`
+      return
+    }
+
+    // Drop the marks that are gone, keep any that failed so a retry still
+    // knows what the user meant, then re-list in place.
+    for (const removed of result.data.deleted) state.selected.delete(removed)
+    await refresh()
+
+    if (result.data.failed.length > 0) {
+      const [first] = result.data.failed
+      if (first) state.error = `${first.error.code}: ${first.error.message}`
+    }
+  }
+
   async function activate(): Promise<void> {
     const entry = current()
     if (!entry) return
@@ -322,6 +358,8 @@ export function useDirectory(side: PanelSide): PaneController {
     setSelected,
     toggleSelection,
     clearSelection,
+    deletionTargets,
+    deleteEntries,
     openSearch,
     updateSearch,
     closeSearch

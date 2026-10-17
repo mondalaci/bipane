@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import FilePanel from '@renderer/components/FilePanel.vue'
+import ConfirmDelete from '@renderer/components/ConfirmDelete.vue'
 import StatusBar from '@renderer/components/StatusBar.vue'
 import TerminalPane from '@renderer/components/TerminalPane.vue'
 import TitleBar from '@renderer/components/TitleBar.vue'
-import { useDirectory } from '@renderer/composables/useDirectory'
+import { useDirectory, type PaneEntry } from '@renderer/composables/useDirectory'
 import { useShell } from '@renderer/composables/useShell'
 import type { PanelSide } from '@shared/types'
 
@@ -23,6 +24,12 @@ const terminalExpanded = ref(false)
 const terminalFocused = ref(false)
 const panelHost = ref<HTMLElement | null>(null)
 const terminalRef = ref<InstanceType<typeof TerminalPane> | null>(null)
+
+/**
+ * F8 never deletes on its own: it stages the pane's targets here and the
+ * dialog confirms them. A non-empty list is what "the dialog is open" means.
+ */
+const deleteTargets = ref<PaneEntry[]>([])
 
 const activePane = computed(() => (activeSide.value === 'left' ? left : right))
 const activePanePath = computed(() => activePane.value.state.path)
@@ -72,6 +79,26 @@ function toggleSearch(): void {
   const pane = activePane.value
   if (pane.state.searchActive) pane.closeSearch()
   else pane.openSearch()
+}
+
+function requestDelete(): void {
+  // Capture the targets now: the pane can refresh under the dialog, but what is
+  // shown (and what is deleted on confirm) must be what was highlighted.
+  const targets = activePane.value.deletionTargets()
+  if (targets.length === 0) return
+  deleteTargets.value = targets
+}
+
+function cancelDelete(): void {
+  deleteTargets.value = []
+  focusPanes()
+}
+
+async function confirmDelete(): Promise<void> {
+  const pane = activePane.value
+  deleteTargets.value = []
+  await pane.deleteEntries()
+  focusPanes()
 }
 
 // A filter belongs to the pane it was typed in.
@@ -260,6 +287,10 @@ function handlePaneKey(event: KeyboardEvent): void {
       consume(event)
       pane.toggleSelection()
       break
+    case 'F8':
+      consume(event)
+      requestDelete()
+      break
     case 'Enter':
       // With a line typed, fall through to the shell and leave the terminal
       // exactly as the user left it.
@@ -273,6 +304,17 @@ function handlePaneKey(event: KeyboardEvent): void {
 }
 
 function onKeydown(event: KeyboardEvent): void {
+  // The delete dialog is modal. Escape cancels; every other key is left to the
+  // dialog (Delete is focused, arrows move between its buttons, Enter activates
+  // the focused one) instead of reaching the panes or the shell.
+  if (deleteTargets.value.length > 0) {
+    if (event.key === 'Escape') {
+      consume(event)
+      cancelDelete()
+    }
+    return
+  }
+
   const isSearchToggle =
     event.altKey &&
     !event.ctrlKey &&
@@ -373,5 +415,12 @@ onBeforeUnmount(() => {
     />
 
     <StatusBar :pane="activePane" :active-side="activeSide" :terminal-open="terminalExpanded" />
+
+    <ConfirmDelete
+      v-if="deleteTargets.length > 0"
+      :entries="deleteTargets"
+      @confirm="confirmDelete"
+      @cancel="cancelDelete"
+    />
   </div>
 </template>

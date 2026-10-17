@@ -2,7 +2,14 @@ import { promises as fs, type Stats } from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { ipcMain, shell } from 'electron'
-import type { DirEntry, DirListing, EntryKind, Result } from '@shared/types'
+import type {
+  DeleteFailure,
+  DeleteOutcome,
+  DirEntry,
+  DirListing,
+  EntryKind,
+  Result
+} from '@shared/types'
 
 function kindFromStats(stats: Stats): EntryKind {
   if (stats.isDirectory()) return 'directory'
@@ -89,4 +96,34 @@ export function registerFsHandlers(): void {
   ipcMain.handle('fs:reveal', (_event, target: string) => {
     shell.showItemInFolder(target)
   })
+
+  ipcMain.handle(
+    'fs:delete',
+    async (_event, targets: string[]): Promise<Result<DeleteOutcome>> => {
+      const deleted: string[] = []
+      const failed: DeleteFailure[] = []
+
+      for (const target of targets) {
+        if (typeof target !== 'string' || target.length === 0) continue
+        const resolved = path.resolve(target)
+        if (resolved === path.parse(resolved).root) {
+          failed.push({
+            path: resolved,
+            error: { code: 'EPERM', message: 'Refusing to delete a filesystem root' }
+          })
+          continue
+        }
+        try {
+          // `recursive` handles directories; `force: false` keeps a missing or
+          // protected path an error instead of a silent success.
+          await fs.rm(resolved, { recursive: true, force: false })
+          deleted.push(resolved)
+        } catch (error) {
+          failed.push({ path: resolved, error: toFsError(error) })
+        }
+      }
+
+      return { ok: true, data: { deleted, failed } }
+    }
+  )
 }
