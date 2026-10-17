@@ -310,7 +310,6 @@ function onRenameBlur(): void {
           v-else
           class="min-w-0 flex-1 truncate"
           :class="controller.isSelected(entry) ? 'text-selected' : ''"
-          :title="entry.path"
           >{{ entry.name }}</span
         >
 
