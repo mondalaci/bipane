@@ -80,11 +80,11 @@ switches sessions; only the active workspace is rendered, and a tab that comes
 back replays its session buffer (see `useWorkspace.ts`).
 
 The bottom strip is the active workspace's shell itself: the same xterm,
-collapsed to two rows, so the prompt, font and echo are the shell's own rather
-than a look-alike widget. `Ctrl+O` expands it into the full terminal, which then
-owns the keyboard outright. While it is collapsed, printable characters go to
-the shell and navigation keys still drive the panels; `Enter` runs the typed
-line, or activates the panel entry when the line is empty. `Backspace` is left
+collapsed to a single visible line, so the prompt, font and echo are the shell's
+own rather than a look-alike widget. `Ctrl+O` expands it into the full terminal,
+which then owns the keyboard outright. While it is collapsed, printable
+characters go to the shell and navigation keys still drive the panels; `Enter`
+runs the typed line, or activates the panel entry when the line is empty. `Backspace` is left
 alone so it edits the line, and reaching the parent is the `..` row's job.
 
 ## Gotchas
@@ -186,8 +186,10 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   while the terminal has a row to spare: a **one-row** terminal scrolls on every
   newline, so the echoed `cd` leaves the viewport for the scrollback before the
   `printf` runs, and `Ctrl+O` then shows a transcript of them. `refit()` in
-  `TerminalPane` therefore clamps the terminal to at least two rows and the
-  collapsed strip is sized (`basis-11`) to show both.
+  `TerminalPane` therefore clamps the terminal to at least two rows. The strip
+  itself shows only the first row (`basis-7`, whose content box is one row tall),
+  so the spare row is clipped away as geometry the erase needs rather than a
+  second visible line — a wrapped command's overflow is clipped with it.
 - **The shell outlives its view; the terminal view does not own it.**
   `TerminalPane` must not kill it on unmount — main reaps sessions when the
   window goes away, and a workspace kills its own session only through

@@ -44,8 +44,10 @@ function refit(): void {
   // spare row below the cursor: a one-row terminal scrolls on every newline, so
   // the echoed `cd` leaves the viewport for the scrollback before the `printf`
   // runs, and Ctrl+O then shows a transcript of syncs the user never typed.
-  // Two rows keep the sync on screen for its own erase to clear, so the strip is
-  // both sized for (basis-11) and clamped to two rows here.
+  // Two rows keep the sync on screen for its own erase to clear, so the terminal
+  // is clamped to two rows here. The collapsed strip shows only the first of
+  // them (basis-7, so the spare row is clipped away) — it is geometry the erase
+  // needs, not a second visible line.
   const rows = Math.max(term.rows, 2)
   if (rows !== term.rows) term.resize(term.cols, rows)
   props.shell.resize(term.cols, rows)
@@ -179,7 +181,7 @@ defineExpose({ focusTerminal })
   <section
     ref="root"
     class="flex min-h-0 flex-col overflow-hidden border-t border-border bg-bg transition-[flex-grow,flex-basis] duration-150 ease-out"
-    :class="expanded ? 'grow basis-0' : 'grow-0 shrink-0 basis-11'"
+    :class="expanded ? 'grow basis-0' : 'grow-0 shrink-0 basis-7'"
     @focusin="emit('focused-change', true)"
     @focusout="onFocusOut"
   >
@@ -210,10 +212,6 @@ defineExpose({ focusTerminal })
       </button>
     </div>
 
-    <div
-      ref="host"
-      class="min-h-0 flex-1 overflow-hidden px-3"
-      :class="expanded ? 'py-1' : 'py-px'"
-    ></div>
+    <div ref="host" class="min-h-0 flex-1 overflow-hidden px-3 py-1"></div>
   </section>
 </template>
