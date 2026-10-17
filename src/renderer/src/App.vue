@@ -400,6 +400,12 @@ function handlePaneKey(event: KeyboardEvent): void {
       consume(event)
       pane.toggleSelection()
       break
+    case 'F3': {
+      consume(event)
+      const entry = pane.current()
+      if (entry && (entry.isParent || entry.kind === 'directory')) void pane.activate()
+      break
+    }
     case 'F5':
       consume(event)
       requestCopy()
