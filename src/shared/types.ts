@@ -66,6 +66,24 @@ export interface CopyOutcome {
   destination: string
 }
 
+export interface MoveFailure {
+  path: string
+  error: FsError
+}
+
+/**
+ * Moving a set of paths is best-effort like copy: a collision or an unreadable
+ * entry is reported without aborting the rest. `moved` lists the destination
+ * paths that now hold the entries, `failed` the source paths with why they did
+ * not go through, and `destination` is the resolved destination directory (a
+ * relative destination resolves against the pane moved from).
+ */
+export interface MoveOutcome {
+  moved: string[]
+  failed: MoveFailure[]
+  destination: string
+}
+
 export interface PtySpawnOptions {
   cwd: string
   cols: number

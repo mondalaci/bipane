@@ -4,6 +4,7 @@ import type {
   CopyOutcome,
   DeleteOutcome,
   DirListing,
+  MoveOutcome,
   PtyDataEvent,
   PtyExitEvent,
   PtySpawnOptions,
@@ -24,6 +25,12 @@ const api: BipaneApi = {
       baseDir: string
     ): Promise<Result<CopyOutcome>> =>
       ipcRenderer.invoke('fs:copy', sources, destination, baseDir),
+    move: (
+      sources: string[],
+      destination: string,
+      baseDir: string
+    ): Promise<Result<MoveOutcome>> =>
+      ipcRenderer.invoke('fs:move', sources, destination, baseDir),
     remove: (targets: string[]): Promise<Result<DeleteOutcome>> =>
       ipcRenderer.invoke('fs:delete', targets)
   },

@@ -47,6 +47,7 @@ export interface PaneController {
   selectionTargets(): PaneEntry[]
   deletionTargets(): PaneEntry[]
   copyEntries(destination: string): Promise<string | null>
+  moveEntries(destination: string): Promise<string | null>
   deleteEntries(): Promise<void>
   openSearch(): void
   updateSearch(query: string): void
@@ -409,6 +410,45 @@ export function useDirectory(side: PanelSide): PaneController {
     return result.data.destination
   }
 
+  /**
+   * Move the pane's targets into `destination`, mirroring copyEntries. A
+   * relative destination resolves against this pane's directory, and a
+   * collision or unreadable entry is reported without aborting the rest. Marks
+   * for entries that actually left are dropped, then the listing is re-read in
+   * place. Returns the resolved destination so the caller can refresh a pane
+   * showing it, or null on failure.
+   */
+  async function moveEntries(destination: string): Promise<string | null> {
+    const targets = selectionTargets()
+    if (targets.length === 0 || !destination) return null
+
+    const result = await window.bipane.fs.move(
+      targets.map((target) => target.path),
+      destination,
+      state.path
+    )
+    if (!result.ok) {
+      state.error = `${result.error.code}: ${result.error.message}`
+      return null
+    }
+
+    // A source that did not fail has left this directory; drop its mark. Marks
+    // for entries that failed stay so a retry still knows what the user meant.
+    const failedPaths = new Set(result.data.failed.map((failure) => failure.path))
+    for (const target of targets) {
+      if (!failedPaths.has(target.path)) state.selected.delete(target.path)
+    }
+
+    await refresh()
+
+    if (result.data.failed.length > 0) {
+      const [first] = result.data.failed
+      if (first) state.error = `${first.error.code}: ${first.error.message}`
+    }
+
+    return result.data.destination
+  }
+
   async function deleteEntries(): Promise<void> {
     const targets = deletionTargets()
     if (targets.length === 0) return
@@ -476,6 +516,7 @@ export function useDirectory(side: PanelSide): PaneController {
     selectionTargets,
     deletionTargets,
     copyEntries,
+    moveEntries,
     deleteEntries,
     openSearch,
     updateSearch,

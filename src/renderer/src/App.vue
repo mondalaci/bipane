@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import FilePanel from '@renderer/components/FilePanel.vue'
-import ConfirmCopy from '@renderer/components/ConfirmCopy.vue'
+import ConfirmTransfer from '@renderer/components/ConfirmTransfer.vue'
 import ConfirmDelete from '@renderer/components/ConfirmDelete.vue'
 import StatusBar from '@renderer/components/StatusBar.vue'
 import TerminalPane from '@renderer/components/TerminalPane.vue'
@@ -39,6 +39,12 @@ const deleteTargets = ref<PaneEntry[]>([])
  * and whatever it emits on confirm is what is copied.
  */
 const copyJob = ref<{ entries: PaneEntry[]; destination: string } | null>(null)
+
+/**
+ * F6 stages the same thing for a move: the active pane's targets and the other
+ * pane's directory, which the dialog can edit before confirming.
+ */
+const moveJob = ref<{ entries: PaneEntry[]; destination: string } | null>(null)
 
 const activePane = computed(() => (activeSide.value === 'left' ? left : right))
 const inactivePane = computed(() => (activeSide.value === 'left' ? right : left))
@@ -136,6 +142,33 @@ async function confirmCopy(destination: string): Promise<void> {
   // The handler resolves a relative destination against the source pane, so the
   // resolved directory is what a pane showing it must be compared against.
   const resolved = await source.copyEntries(destination)
+  if (resolved && target.state.path === resolved) await target.refresh()
+  focusPanes()
+}
+
+/**
+ * F6 moves into the other pane, mirroring F5: the source is the active pane and
+ * the destination is the inactive one. Capture both now, since the dialog is
+ * modal but the panes can still refresh under it.
+ */
+function requestMove(): void {
+  const targets = activePane.value.selectionTargets()
+  const destination = inactivePane.value.state.path
+  if (targets.length === 0 || !destination) return
+  moveJob.value = { entries: targets, destination }
+}
+
+function cancelMove(): void {
+  moveJob.value = null
+  focusPanes()
+}
+
+async function confirmMove(destination: string): Promise<void> {
+  const source = activePane.value
+  const target = inactivePane.value
+  moveJob.value = null
+
+  const resolved = await source.moveEntries(destination)
   if (resolved && target.state.path === resolved) await target.refresh()
   focusPanes()
 }
@@ -340,9 +373,9 @@ function handlePaneKey(event: KeyboardEvent): void {
       requestDelete()
       break
     case 'F6':
-      if (!event.shiftKey) break
       consume(event)
-      pane.beginRename()
+      if (event.shiftKey) pane.beginRename()
+      else requestMove()
       break
     case 'Enter':
       // With a line typed, fall through to the shell and leave the terminal
@@ -360,10 +393,15 @@ function onKeydown(event: KeyboardEvent): void {
   // The dialogs are modal. Escape cancels; every other key is left to the
   // dialog (its default button is focused, arrows move between the buttons,
   // Enter activates the focused one) instead of reaching the panes or shell.
-  if (deleteTargets.value.length > 0 || copyJob.value !== null) {
+  if (
+    deleteTargets.value.length > 0 ||
+    copyJob.value !== null ||
+    moveJob.value !== null
+  ) {
     if (event.key === 'Escape') {
       consume(event)
       if (deleteTargets.value.length > 0) cancelDelete()
+      else if (moveJob.value !== null) cancelMove()
       else cancelCopy()
     }
     return
@@ -470,12 +508,22 @@ onBeforeUnmount(() => {
 
     <StatusBar :pane="activePane" :active-side="activeSide" :terminal-open="terminalExpanded" />
 
-    <ConfirmCopy
+    <ConfirmTransfer
       v-if="copyJob"
       :entries="copyJob.entries"
       :destination="copyJob.destination"
+      mode="copy"
       @confirm="confirmCopy"
       @cancel="cancelCopy"
+    />
+
+    <ConfirmTransfer
+      v-if="moveJob"
+      :entries="moveJob.entries"
+      :destination="moveJob.destination"
+      mode="move"
+      @confirm="confirmMove"
+      @cancel="cancelMove"
     />
 
     <ConfirmDelete

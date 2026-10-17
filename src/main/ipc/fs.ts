@@ -10,6 +10,8 @@ import type {
   DirEntry,
   DirListing,
   EntryKind,
+  MoveFailure,
+  MoveOutcome,
   Result
 } from '@shared/types'
 
@@ -218,6 +220,107 @@ export function registerFsHandlers(): void {
       }
 
       return { ok: true, data: { copied, failed, destination: destDir } }
+    }
+  )
+
+  ipcMain.handle(
+    'fs:move',
+    async (
+      _event,
+      sources: string[],
+      destination: string,
+      baseDir: string
+    ): Promise<Result<MoveOutcome>> => {
+      if (typeof destination !== 'string' || destination.length === 0) {
+        return { ok: false, error: { code: 'EINVAL', message: 'No destination directory' } }
+      }
+      if (!Array.isArray(sources)) {
+        return { ok: false, error: { code: 'EINVAL', message: 'Invalid move arguments' } }
+      }
+
+      // A relative destination belongs to the pane being moved from, exactly as
+      // for copy: typing `sub` must mean `<pane>/sub`.
+      const base =
+        typeof baseDir === 'string' && baseDir.length > 0 ? path.resolve(baseDir) : process.cwd()
+      const destDir = path.isAbsolute(destination)
+        ? path.resolve(destination)
+        : path.resolve(base, destination)
+
+      // Create a destination the dialog named but that does not exist yet, so
+      // typing a fresh folder name works instead of failing on a missing parent.
+      try {
+        await fs.mkdir(destDir, { recursive: true })
+      } catch (error) {
+        return { ok: false, error: toFsError(error) }
+      }
+
+      const moved: string[] = []
+      const failed: MoveFailure[] = []
+
+      for (const source of sources) {
+        if (typeof source !== 'string' || source.length === 0) continue
+
+        const from = path.resolve(source)
+        const to = path.join(destDir, path.basename(from))
+
+        // Moving an entry into its own directory leaves it where it is.
+        if (from === to) continue
+
+        if (from === path.parse(from).root) {
+          failed.push({
+            path: from,
+            error: { code: 'EPERM', message: 'Refusing to move a filesystem root' }
+          })
+          continue
+        }
+
+        try {
+          // Never silently clobber: an existing name in the destination is a
+          // per-entry failure, exactly like copy and rename.
+          try {
+            await fs.lstat(to)
+            failed.push({
+              path: from,
+              error: {
+                code: 'EEXIST',
+                message: `"${path.basename(to)}" already exists in "${destDir}"`
+              }
+            })
+            continue
+          } catch {
+            // Destination is free — proceed.
+          }
+
+          // A directory cannot be moved into itself or into one of its own
+          // descendants.
+          if (to.startsWith(from + path.sep)) {
+            failed.push({
+              path: from,
+              error: { code: 'EINVAL', message: 'Cannot move a directory into itself' }
+            })
+            continue
+          }
+
+          try {
+            await fs.rename(from, to)
+          } catch (error) {
+            // rename cannot cross filesystems (EXDEV); fall back to copy and
+            // only remove the source once the copy has finished.
+            if ((error as NodeJS.ErrnoException).code === 'EXDEV') {
+              await fs.cp(from, to, { recursive: true, errorOnExist: true, force: false })
+              await fs.rm(from, { recursive: true, force: false })
+            } else {
+              throw error
+            }
+          }
+
+          moved.push(to)
+        } catch (error) {
+          failed.push({ path: from, error: toFsError(error) })
+        }
+      }
+
+      return { ok: true, data: { moved, failed, destination: destDir } }
     }
   )
 

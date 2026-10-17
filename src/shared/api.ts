@@ -2,6 +2,7 @@ import type {
   CopyOutcome,
   DeleteOutcome,
   DirListing,
+  MoveOutcome,
   PtyDataEvent,
   PtyExitEvent,
   PtySpawnOptions,
@@ -16,6 +17,7 @@ export interface BipaneFsApi {
   reveal(target: string): Promise<void>
   rename(source: string, target: string): Promise<Result<string>>
   copy(sources: string[], destination: string, baseDir: string): Promise<Result<CopyOutcome>>
+  move(sources: string[], destination: string, baseDir: string): Promise<Result<MoveOutcome>>
   remove(targets: string[]): Promise<Result<DeleteOutcome>>
 }
 

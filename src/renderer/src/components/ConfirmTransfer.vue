@@ -2,7 +2,11 @@
 import { computed, onMounted, ref } from 'vue'
 import type { PaneEntry } from '@renderer/composables/useDirectory'
 
-const props = defineProps<{ entries: PaneEntry[]; destination: string }>()
+const props = defineProps<{
+  entries: PaneEntry[]
+  destination: string
+  mode: 'copy' | 'move'
+}>()
 
 const emit = defineEmits<{
   (event: 'confirm', destination: string): void
@@ -11,20 +15,23 @@ const emit = defineEmits<{
 
 const destInput = ref<HTMLInputElement | null>(null)
 const cancelButton = ref<HTMLButtonElement | null>(null)
-const copyButton = ref<HTMLButtonElement | null>(null)
+const actionButton = ref<HTMLButtonElement | null>(null)
 
 const dest = ref(props.destination)
 
+const isMove = computed(() => props.mode === 'move')
+const label = computed(() => (isMove.value ? 'Move' : 'Copy'))
+
 const title = computed(() => {
   const [first] = props.entries
-  if (props.entries.length === 1 && first) return `Copy ${first.name}?`
-  return `Copy ${props.entries.length} items?`
+  if (props.entries.length === 1 && first) return `${label.value} ${first.name}?`
+  return `${label.value} ${props.entries.length} items?`
 })
 
 const hasDirectory = computed(() => props.entries.some((entry) => entry.kind === 'directory'))
 
 // The destination is the field to edit, so it starts focused with its text
-// selected: typing replaces the path the way the classic copy dialog does.
+// selected: typing replaces the path the way the classic transfer dialog does.
 onMounted(() => {
   destInput.value?.focus()
   destInput.value?.select()
@@ -58,7 +65,7 @@ function onKey(event: KeyboardEvent): void {
     case 'ArrowRight':
     case 'ArrowDown':
       event.preventDefault()
-      copyButton.value?.focus()
+      actionButton.value?.focus()
       break
   }
 }
@@ -86,8 +93,14 @@ function onKey(event: KeyboardEvent): void {
           stroke-linejoin="round"
           aria-hidden="true"
         >
-          <rect x="9" y="9" width="11" height="11" rx="2" />
-          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+          <template v-if="isMove">
+            <path d="M13 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h8" />
+            <path d="M15 7l5 5-5 5M20 12H9" />
+          </template>
+          <template v-else>
+            <rect x="9" y="9" width="11" height="11" rx="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+          </template>
         </svg>
         <span class="min-w-0 flex-1 truncate text-ui-lg text-fg-bright" :title="title">
           {{ title }}
@@ -107,8 +120,9 @@ function onKey(event: KeyboardEvent): void {
         <p class="text-ui-sm text-fg-dim">
           Existing entries in the destination are left untouched.
           <template v-if="hasDirectory">
-            Directories are copied with everything in them.
+            Directories are {{ isMove ? 'moved' : 'copied' }} with everything in them.
           </template>
+          <template v-if="isMove"> Moved entries leave the source pane.</template>
         </p>
       </div>
 
@@ -122,12 +136,12 @@ function onKey(event: KeyboardEvent): void {
           Cancel
         </button>
         <button
-          ref="copyButton"
+          ref="actionButton"
           type="button"
           class="rounded border border-accent-strong bg-accent-strong/15 px-3 py-1 text-ui text-accent-strong hover:bg-accent-strong/25 focus:border-accent-strong focus:bg-accent-strong focus:text-white focus:outline-2 focus:outline-accent-strong"
           @click="commit"
         >
-          Copy
+          {{ label }}
         </button>
       </div>
     </div>
