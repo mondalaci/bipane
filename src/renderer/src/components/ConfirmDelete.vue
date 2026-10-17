@@ -12,11 +12,12 @@ defineEmits<{
 const cancelButton = ref<HTMLButtonElement | null>(null)
 const deleteButton = ref<HTMLButtonElement | null>(null)
 
-const title = computed(() =>
-  props.entries.length === 1 ? 'Delete this item?' : `Delete ${props.entries.length} items?`
-)
+const title = computed(() => {
+  const [first] = props.entries
+  if (props.entries.length === 1 && first) return `Delete ${first.name}?`
+  return `Delete ${props.entries.length} items?`
+})
 
-const single = computed(() => (props.entries.length === 1 ? props.entries[0] : null))
 const hasDirectory = computed(() => props.entries.some((entry) => entry.kind === 'directory'))
 
 // Delete is the default action, and the focus the arrow keys move from.
@@ -64,13 +65,12 @@ function onKey(event: KeyboardEvent): void {
         >
           <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v5M14 11v5" />
         </svg>
-        <span class="text-ui-lg text-fg-bright">{{ title }}</span>
+        <span class="min-w-0 flex-1 truncate text-ui-lg text-fg-bright" :title="title">
+          {{ title }}
+        </span>
       </div>
 
       <div class="flex flex-col gap-2 px-4 py-3">
-        <p v-if="single" class="truncate font-mono text-ui text-fg-dim" :title="single.path">
-          {{ single.name }}
-        </p>
         <p class="text-ui-sm text-fg-dim">
           This cannot be undone.
           <template v-if="hasDirectory"> Directories are removed with everything in them.</template>
