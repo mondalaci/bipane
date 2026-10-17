@@ -36,6 +36,8 @@ src/renderer/src/components/TerminalPane.vue xterm over the shared shell: the
 src/renderer/src/composables/useShell.ts     the single shared shell session
 src/renderer/src/composables/useDirectory.ts per-pane navigation state + actions
 src/renderer/src/lib/format.ts               size/date/permission formatting
+src/renderer/src/lib/fileIcon.ts             per-entry icon: name/extension -> 24x24 svg
+                                             (FILENAME_ICONS, EXTENSION_ICONS, fallback text)
 ```
 
 Keys: `Tab` switches panes, arrows/`Home`/`End`/`PgUp`/`PgDn` move the cursor,
