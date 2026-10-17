@@ -22,18 +22,25 @@ There is no linter or test runner configured yet.
 ```
 src/main/index.ts        window lifecycle, single-instance lock
 src/main/ipc/fs.ts       IPC: fs:home, fs:list, fs:read, fs:write, fs:read-image,
-                         fs:open, fs:reveal
+                         fs:image-size, fs:open, fs:reveal
                          (fs:read/fs:write serve the viewer: regular text files
                          only, binary and oversized reads refused/truncated)
                          (fs:read-image serves a pane footer's preview: a
                          decodable image as a data: URL, downscaled in main
                          when the file is too large to hand over whole)
+                         (fs:image-size reads just the header, so a footer can
+                         reserve the picture's shape before reading it)
+src/main/imageSize.ts    header-only image dimensions (PNG/JPEG+EXIF/GIF/BMP/
+                         ICO/WebP/SVG); no decode, so it answers in well under
+                         a millisecond even for a file the preview has to
+                         downscale
 src/main/ipc/watch.ts    IPC: fs:watch, fs:unwatch; pushes fs:changed when a
                          watched directory's contents change (fs.watch = inotify)
 src/main/ipc/pty.ts      IPC: pty:create/write/resize/kill/state, pushes pty:data, pty:exit
 src/main/ipc/window.ts   IPC: window:minimize/toggle-maximize/close/is-maximized
 src/preload/index.ts     contextBridge -> window.bipane (implements BipaneApi)
-src/shared/types.ts      DirEntry/DirListing/Result/ImagePreview/Pty* types (main + renderer)
+src/shared/types.ts      DirEntry/DirListing/Result/ImagePreview/ImageSize/
+                         Pty* types (main + renderer)
 src/shared/api.ts        BipaneApi interface (the preload contract)
 src/shared/image.ts      extension -> previewable image MIME map, shared so the
                          renderer and main agree on what a footer may preview
@@ -183,24 +190,36 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   a `data:` URL (the renderer CSP allows `img-src data:` but not `file:`), and
   `FilePanel` reserves the space from the moment the cursor lands on an image,
   so arrowing between images does not collapse and re-expand the list on every
-  step. The read itself waits for the cursor to settle (`PREVIEW_SETTLE_MS`,
-  re-armed by every cursor change): reading each row a held arrow key passes
-  over stalls the renderer on a large data URL — and main on a large decode —
-  and the input being handled is what pays for it, which is exactly the choppy
-  cursor movement that produces. The read is keyed by path *and* size/mtime and
+  step — and it reserves it at the picture's own shape: `fs:image-size` reads
+  only the header (`src/main/imageSize.ts`, no decode), so the box is the right
+  ratio with a spinner in it before the image arrives, and nothing jumps when it
+  does. That probe is issued on the cursor move itself, while the read waits out
+  the settle delay, and the box is held back until it answers: deferring the
+  probe with the read left the ratio-less default frame on screen for the whole
+  settle delay, flashing a wide box on the way to every preview, and a header
+  read is cheap enough to run for each row a key repeat passes over. The probe
+  is also the reason a rotated photo is framed correctly: it folds in the JPEG's
+  EXIF orientation, which is what the browser will apply when it paints. A
+  format the header cannot be measured from (AVIF) leaves the box at its cap and
+  the image's own ratio is adopted once it renders. The read itself waits for
+  the cursor to settle (`PREVIEW_SETTLE_MS`, re-armed by every cursor change):
+  reading each row a held arrow key passes over stalls the renderer on a large
+  data URL — and main on a large decode — and the input being handled is what
+  pays for it, which is exactly the choppy cursor movement that produces. The read is keyed by path *and* size/mtime and
   token-guarded, so an external rewrite reloads while a slow read for a row the
   user has left cannot land on the newer one, and main keeps the last few
   previews (bounded by bytes and by count) so scrolling back over a folder does
   not pay for the same image twice. A mapped extension that still fails to decode
   (a truncated PNG) clears the preview through the `<img>` error handler and
-  releases the space — the bar shows nothing rather than a broken frame. Size is handled in main rather
-  than refused: a file up to 16 MiB travels as its own bytes — so an animated
-  GIF stays animated, an SVG stays vector and a JPEG keeps its EXIF orientation
-  — and anything larger is decoded with `nativeImage` and downscaled to 512px,
-  so the payload stays small however large the source is. That decode is
-  synchronous and blocks main for the length of one image, which is exactly why
-  the small-file path skips it. Only a file that is both past 64 MiB and
-  undecodable by the platform is refused, and its reserved space is given back.
+  releases the space — the bar shows nothing rather than a broken frame. Size is
+  handled in main rather than refused: a file up to 16 MiB travels as its own
+  bytes — so an animated GIF stays animated, an SVG stays vector and a JPEG
+  keeps its EXIF orientation — and anything larger is decoded with `nativeImage`
+  and downscaled to 512px, so the payload stays small however large the source
+  is. That decode is synchronous and blocks main for the length of one image,
+  which is exactly why the small-file path skips it. Only a file that is both
+  past 64 MiB and undecodable by the platform is refused, and its reserved space
+  is given back.
 - **Intercepted keys must `stopPropagation`, not just `preventDefault`.** xterm
   handles keys from a capture listener on its own textarea and does *not* consult
   `defaultPrevented`, so a merely-prevented navigation key is still forwarded to

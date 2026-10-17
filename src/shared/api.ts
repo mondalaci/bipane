@@ -5,6 +5,7 @@ import type {
   FileContent,
   FsChangeEvent,
   ImagePreview,
+  ImageSize,
   MoveOutcome,
   PtyDataEvent,
   PtyExitEvent,
@@ -27,6 +28,13 @@ export interface BipaneFsApi {
    * anything else is an error the bar simply renders nothing for.
    */
   readImage(target: string): Promise<Result<ImagePreview>>
+  /**
+   * The pixel dimensions in an image's header, read without decoding it, so a
+   * pane can reserve a preview of the right shape before reading the image
+   * itself. Null when the target is not a previewable image, or when its header
+   * does not carry the dimensions cheaply — nothing to reserve, not an error.
+   */
+  imageSize(target: string): Promise<ImageSize | null>
   /**
    * Overwrite a regular text file with edited content (the editor's save).
    * Returns the resolved path that was written.

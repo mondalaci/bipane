@@ -5,6 +5,7 @@ import type { PaneController, ScrollAlign } from '@renderer/composables/useDirec
 import { formatDate, formatMode, formatSize } from '@renderer/lib/format'
 import FileIcon from '@renderer/components/FileIcon.vue'
 import { imageMimeFor } from '@shared/image'
+import type { ImageSize } from '@shared/types'
 
 const ROW_HEIGHT = 22
 
@@ -42,9 +43,40 @@ const imageEntry = computed(() => {
  */
 const preview = ref<string | null>(null)
 const previewPending = ref(false)
-const previewVisible = computed(
-  () => imageEntry.value !== null && (previewPending.value || preview.value !== null)
-)
+
+/**
+ * The image's shape, read from its header long before the image itself, and
+ * `sizeHintKnown` is whether that probe has answered for the row in hand. The
+ * box is not shown until it has: it would otherwise appear at the ratio-less
+ * default width and only snap to the picture's real shape once the probe
+ * landed, which is a wide frame flashing on the way to every preview.
+ */
+const sizeHint = ref<ImageSize | null>(null)
+const sizeHintKnown = ref(false)
+
+const previewVisible = computed(() => {
+  if (imageEntry.value === null) return false
+  if (preview.value !== null) return true
+  return previewPending.value && sizeHintKnown.value
+})
+
+const PREVIEW_HEIGHT = 64
+const PREVIEW_MAX_WIDTH = 160
+
+/**
+ * The reserved box: the hinted ratio at the preview's height, capped at the
+ * preview's width (a very wide image letterboxes rather than pushing the rest
+ * of the bar off the strip). Without a hint the box is the full cap and the
+ * image settles into it once it loads.
+ */
+const previewBoxStyle = computed(() => {
+  const hint = sizeHint.value
+  const ratio = hint && hint.height > 0 ? hint.width / hint.height : null
+  const limit = PREVIEW_MAX_WIDTH / PREVIEW_HEIGHT
+  const capped = ratio === null ? limit : Math.min(ratio, limit)
+  const width = Math.max(1, Math.round(PREVIEW_HEIGHT * capped))
+  return { width: `${width}px`, height: `${PREVIEW_HEIGHT}px` }
+})
 
 /**
  * How long the cursor must hold still before its image is read. A held arrow
@@ -57,9 +89,10 @@ const previewVisible = computed(
 const PREVIEW_SETTLE_MS = 150
 
 /**
- * Read the image the cursor sits on. Keyed by path *and* size/mtime so an
- * external rewrite of the same path reloads, and guarded by a token so a slow
- * read for a row the user has already left cannot replace the newer preview.
+ * The shape probe and the image read for the row the cursor sits on. Both are
+ * keyed by path *and* size/mtime so an external rewrite of the same path
+ * reloads, and both are token-guarded so a slow answer for a row the user has
+ * already left cannot replace the newer one.
  */
 let previewToken = 0
 let previewTimer: number | null = null
@@ -70,11 +103,15 @@ function cancelPreviewRead(): void {
   previewTimer = null
 }
 
-async function loadPreview(token: number): Promise<void> {
-  const current = imageEntry.value
-  if (!current || token !== previewToken) return
+async function loadSizeHint(token: number, path: string): Promise<void> {
+  const hint = await window.bipane.fs.imageSize(path)
+  if (token !== previewToken) return
+  sizeHint.value = hint
+  sizeHintKnown.value = true
+}
 
-  const result = await window.bipane.fs.readImage(current.path)
+async function loadPreview(token: number, path: string): Promise<void> {
+  const result = await window.bipane.fs.readImage(path)
   if (token !== previewToken) return
   previewPending.value = false
   preview.value = result.ok ? result.data.dataUrl : null
@@ -89,14 +126,43 @@ watch(
     cancelPreviewRead()
     const token = (previewToken += 1)
     preview.value = null
-    previewPending.value = key !== null
-    if (key === null) return
+
+    if (key === null) {
+      sizeHint.value = null
+      sizeHintKnown.value = false
+      previewPending.value = false
+      return
+    }
+
+    // The shape is probed now, not with the read: it is a header read in main,
+    // so waiting out the settle delay first would leave the default frame up
+    // for that whole window before the box took the picture's real shape. The
+    // row just left keeps its shape until this probe answers (~1ms), so the box
+    // neither blinks nor flashes a width it is about to leave.
+    previewPending.value = true
+    const current = imageEntry.value
+    if (!current) return
+
+    void loadSizeHint(token, current.path)
     previewTimer = window.setTimeout(() => {
       previewTimer = null
-      void loadPreview(token)
+      void loadPreview(token, current.path)
     }, PREVIEW_SETTLE_MS)
   }
 )
+
+/**
+ * A format whose header the probe cannot measure still reveals its shape when it
+ * renders, so adopt it then rather than leaving the default box for good.
+ */
+function onPreviewLoad(event: Event): void {
+  if (sizeHint.value) return
+  const image = event.target
+  if (!(image instanceof HTMLImageElement)) return
+  if (image.naturalWidth > 0 && image.naturalHeight > 0) {
+    sizeHint.value = { width: image.naturalWidth, height: image.naturalHeight }
+  }
+}
 
 function onPreviewError(): void {
   // A mapped extension can still fail to decode (a truncated or malformed
@@ -436,14 +502,23 @@ function onRenameBlur(): void {
       :class="previewVisible ? 'py-1' : 'h-6'"
     >
       <div class="flex min-w-0 items-center gap-3">
-        <div v-if="previewVisible" class="flex h-16 shrink-0 items-center">
+        <div
+          v-if="previewVisible"
+          :style="previewBoxStyle"
+          class="flex shrink-0 items-center justify-center overflow-hidden rounded border border-border-subtle bg-bg"
+        >
           <img
             v-if="preview"
             :src="preview"
             alt=""
             draggable="false"
-            class="h-16 w-auto max-w-40 rounded border border-border-subtle object-contain"
+            class="h-full w-full object-contain"
+            @load="onPreviewLoad"
             @error="onPreviewError"
+          />
+          <span
+            v-else
+            class="h-3.5 w-3.5 animate-spin rounded-full border border-fg border-t-transparent"
           />
         </div>
 

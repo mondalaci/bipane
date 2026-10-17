@@ -64,6 +64,17 @@ export interface ImagePreview {
   dataUrl: string
 }
 
+/**
+ * An image's pixel dimensions, read from its header rather than by decoding it,
+ * so a pane can reserve a preview of the right shape before the image arrives.
+ * Nullable everywhere it is returned: a format whose header does not carry them
+ * cheaply simply has no shape to reserve.
+ */
+export interface ImageSize {
+  width: number
+  height: number
+}
+
 export type Result<T> = { ok: true; data: T } | { ok: false; error: FsError }
 
 export interface DeleteFailure {

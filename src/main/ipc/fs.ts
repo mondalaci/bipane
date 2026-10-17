@@ -4,6 +4,7 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import { ipcMain, nativeImage, shell } from 'electron'
 import { imageMimeFor } from '@shared/image'
+import { readImageSize } from '../imageSize'
 import type {
   CopyFailure,
   CopyOutcome,
@@ -14,6 +15,7 @@ import type {
   EntryKind,
   FileContent,
   ImagePreview,
+  ImageSize,
   MoveFailure,
   MoveOutcome,
   Result
@@ -320,6 +322,37 @@ async function readImageForPreview(input: string): Promise<ImagePreview> {
   return { dataUrl: `data:${mime};base64,${bytes.toString('base64')}` }
 }
 
+/**
+ * How much of a file the size probe reads. The dimensions sit in the header of
+ * every format handled here, but a JPEG's can come after its EXIF and an
+ * embedded thumbnail, so this is generous — reading a prefix is still cheap
+ * next to the decode the preview itself needs.
+ */
+const SIZE_PROBE_BYTES = 256 * 1024
+
+/**
+ * The dimensions of an image file, so the renderer can reserve a preview of the
+ * right shape before the image is read. Only a prefix of the file is read and
+ * nothing is decoded, so this answers in well under a millisecond even for a
+ * file the preview read would take hundreds of milliseconds to decode. A format
+ * the probe cannot measure answers null rather than failing: there is simply no
+ * shape to reserve.
+ */
+async function readImageSizeForPreview(input: string): Promise<ImageSize | null> {
+  const target = path.resolve(input)
+  if (!imageMimeFor(target)) return null
+
+  const handle = await fs.open(target, fsConstants.O_RDONLY | fsConstants.O_NONBLOCK)
+  try {
+    const stats = await handle.stat()
+    if (!stats.isFile()) return null
+    const bytes = await readAll(handle, Math.min(stats.size, SIZE_PROBE_BYTES))
+    return readImageSize(bytes)
+  } finally {
+    await handle.close()
+  }
+}
+
 export function registerFsHandlers(): void {
   ipcMain.handle('fs:home', () => os.homedir())
 
@@ -354,6 +387,16 @@ export function registerFsHandlers(): void {
       return { ok: true, data: await readImageForPreview(target) }
     } catch (error) {
       return { ok: false, error: toFsError(error) }
+    }
+  })
+
+  ipcMain.handle('fs:image-size', async (_event, target: string): Promise<ImageSize | null> => {
+    if (typeof target !== 'string' || target.length === 0) return null
+    try {
+      return await readImageSizeForPreview(target)
+    } catch {
+      // Nothing to reserve is not an error the renderer can act on.
+      return null
     }
   })
 
