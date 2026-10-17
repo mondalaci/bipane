@@ -206,13 +206,9 @@ function onRenameBlur(): void {
 <template>
   <section class="flex min-w-0 flex-1 flex-col" @mousedown="onPointerDown" @contextmenu.prevent>
     <div
-      class="flex h-9 shrink-0 items-center gap-2 border-b border-border-subtle bg-surface px-3"
-      :class="active ? 'text-fg' : 'text-fg-dim'"
+      class="flex h-7 shrink-0 items-center gap-2 border-b border-border-subtle px-3"
+      :class="active ? 'bg-title-active text-fg-bright' : 'bg-surface text-fg-dim'"
     >
-      <span
-        class="h-1.5 w-1.5 shrink-0 rounded-full"
-        :class="active ? 'bg-accent-strong' : 'bg-border'"
-      ></span>
       <span class="truncate font-mono text-ui-sm" :title="controller.state.path">
         {{ controller.state.path || '—' }}
       </span>
