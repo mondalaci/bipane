@@ -1,17 +1,24 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import FilePanel from '@renderer/components/FilePanel.vue'
 import ConfirmTransfer from '@renderer/components/ConfirmTransfer.vue'
 import ConfirmDelete from '@renderer/components/ConfirmDelete.vue'
 import StatusBar from '@renderer/components/StatusBar.vue'
 import TerminalPane from '@renderer/components/TerminalPane.vue'
 import TitleBar from '@renderer/components/TitleBar.vue'
-import { useDirectory, type PaneEntry } from '@renderer/composables/useDirectory'
+import { useDirectory, type PaneController, type PaneEntry } from '@renderer/composables/useDirectory'
 import { useShell } from '@renderer/composables/useShell'
 import type { PanelSide } from '@shared/types'
 
-const left = useDirectory('left')
-const right = useDirectory('right')
+/**
+ * The controller each column renders. They are refs rather than constants
+ * because Ctrl+U exchanges them: swapping the controllers moves each directory
+ * together with its cursor, marks and filter and needs no re-listing, and it
+ * leaves `activeSide` meaningful as a physical column, so the pane that was
+ * active stays under the user's cursor.
+ */
+const left = shallowRef<PaneController>(useDirectory('left'))
+const right = shallowRef<PaneController>(useDirectory('right'))
 
 const shell = useShell()
 const shellCwd = shell.cwd
@@ -46,8 +53,8 @@ const copyJob = ref<{ entries: PaneEntry[]; destination: string } | null>(null)
  */
 const moveJob = ref<{ entries: PaneEntry[]; destination: string } | null>(null)
 
-const activePane = computed(() => (activeSide.value === 'left' ? left : right))
-const inactivePane = computed(() => (activeSide.value === 'left' ? right : left))
+const activePane = computed(() => (activeSide.value === 'left' ? left.value : right.value))
+const inactivePane = computed(() => (activeSide.value === 'left' ? right.value : left.value))
 const activePanePath = computed(() => activePane.value.state.path)
 
 function shellQuote(value: string): string {
@@ -64,6 +71,19 @@ const ERASE_ECHO = "printf '\\033[1A\\033[2K'"
 
 function setActive(side: PanelSide): void {
   activeSide.value = side
+}
+
+/**
+ * Ctrl+U exchanges the two panels. The swap is a rebinding, not a re-listing:
+ * each controller keeps its directory, cursor, marks and filter, and they simply
+ * trade columns. `activeSide` is flipped with them so the active pane follows its
+ * directory to the other column rather than the highlight staying put.
+ */
+function swapPanels(): void {
+  const previous = left.value
+  left.value = right.value
+  right.value = previous
+  setActive(activeSide.value === 'left' ? 'right' : 'left')
 }
 
 /**
@@ -175,12 +195,12 @@ async function confirmMove(destination: string): Promise<void> {
 
 // A filter belongs to the pane it was typed in.
 watch(activeSide, (side) => {
-  const inactive = side === 'left' ? right : left
+  const inactive = side === 'left' ? right.value : left.value
   inactive.closeSearch()
 })
 
 watch(
-  () => left.state.searchActive || right.state.searchActive,
+  () => left.value.state.searchActive || right.value.state.searchActive,
   (anyActive, wasActive) => {
     if (!wasActive || anyActive) return
     if (!terminalExpanded.value) terminalRef.value?.focusTerminal()
@@ -253,7 +273,7 @@ let commandSettleTimer: number | null = null
 function refreshPanelsAtShellCwd(): void {
   const target = shellCwd.value
   if (!target) return
-  for (const pane of [left, right]) {
+  for (const pane of [left.value, right.value]) {
     if (pane.state.path === target) void pane.refresh()
   }
 }
@@ -307,6 +327,22 @@ function handlePaneKey(event: KeyboardEvent): void {
   if (event.key === 'Tab') {
     consume(event)
     setActive(activeSide.value === 'left' ? 'right' : 'left')
+    return
+  }
+
+  // Ctrl+U swaps the panels. It is claimed here rather than beside Ctrl+O and
+  // Ctrl+R so that an expanded, focused terminal keeps its own Ctrl+U
+  // (kill-line): this function only runs once the terminal has been ruled out
+  // as the owner of the keyboard.
+  if (
+    event.ctrlKey &&
+    !event.shiftKey &&
+    !event.altKey &&
+    !event.metaKey &&
+    event.key.toLowerCase() === 'u'
+  ) {
+    consume(event)
+    swapPanels()
     return
   }
 
@@ -463,8 +499,8 @@ function onKeydown(event: KeyboardEvent): void {
 window.addEventListener('keydown', onKeydown, { capture: true })
 
 onMounted(() => {
-  void left.init()
-  void right.init()
+  void left.value.init()
+  void right.value.init()
 })
 
 onBeforeUnmount(() => {
