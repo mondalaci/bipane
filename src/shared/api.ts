@@ -13,6 +13,7 @@ export interface BipaneFsApi {
   list(dir: string): Promise<Result<DirListing>>
   open(target: string): Promise<string>
   reveal(target: string): Promise<void>
+  rename(source: string, target: string): Promise<Result<string>>
   remove(targets: string[]): Promise<Result<DeleteOutcome>>
 }
 

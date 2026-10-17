@@ -227,6 +227,11 @@ function handlePaneKey(event: KeyboardEvent): void {
   const searching = pane.state.searchActive
   const hasInput = shellInput.value.length > 0
 
+  // An in-place rename hands the keyboard to its input, exactly like search:
+  // printable characters, Backspace and the arrow keys edit the text, and
+  // Enter/Escape are the input's to commit or cancel.
+  if (pane.state.renaming !== null) return
+
   if (event.key === 'Tab') {
     consume(event)
     setActive(activeSide.value === 'left' ? 'right' : 'left')
@@ -290,6 +295,11 @@ function handlePaneKey(event: KeyboardEvent): void {
     case 'F8':
       consume(event)
       requestDelete()
+      break
+    case 'F6':
+      if (!event.shiftKey) break
+      consume(event)
+      pane.beginRename()
       break
     case 'Enter':
       // With a line typed, fall through to the shell and leave the terminal

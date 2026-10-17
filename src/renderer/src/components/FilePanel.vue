@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import type { ComponentPublicInstance } from 'vue'
 import type { PaneController, ScrollAlign } from '@renderer/composables/useDirectory'
 import { formatDate, formatSize } from '@renderer/lib/format'
 import FileIcon from '@renderer/components/FileIcon.vue'
@@ -153,6 +154,53 @@ function rowClass(index: number): string {
 function metaClass(index: number): string {
   return index === props.controller.state.cursor ? 'text-fg' : 'text-fg-dim'
 }
+
+/**
+ * In-place rename. The input is rendered only for the entry the controller is
+ * editing, but it lives inside the v-for, so a string ref would collect an
+ * array — a function ref keeps a single element handle. Focus and select the
+ * basename once the row has swapped to an input.
+ */
+let renameInput: HTMLInputElement | null = null
+
+function setRenameInput(el: Element | ComponentPublicInstance | null): void {
+  renameInput = el instanceof HTMLInputElement ? el : null
+}
+
+watch(
+  () => props.controller.state.renaming,
+  async (renaming) => {
+    if (!renaming) return
+    await nextTick()
+    const input = renameInput
+    if (!input) return
+    input.focus()
+    // Preselect the stem so typing replaces the name but keeps the extension —
+    // the classic rename gesture. A dotfile or extension-less name selects whole.
+    const dot = input.value.lastIndexOf('.')
+    if (dot > 0) input.setSelectionRange(0, dot)
+    else input.select()
+  }
+)
+
+function onRenameKey(event: KeyboardEvent): void {
+  if (event.key === 'Enter') {
+    event.preventDefault()
+    const input = event.target as HTMLInputElement
+    void props.controller.commitRename(input.value)
+    return
+  }
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    props.controller.cancelRename()
+  }
+}
+
+function onRenameBlur(): void {
+  // Commit already cleared `renaming` before the input can lose focus, so a
+  // blur that still sees an edit in progress is a real cancellation.
+  if (props.controller.state.renaming !== null) props.controller.cancelRename()
+}
 </script>
 
 <template>
@@ -244,7 +292,22 @@ function metaClass(index: number): string {
           <FileIcon :entry="entry" />
         </span>
 
+        <input
+          v-if="controller.state.renaming === entry.path"
+          :ref="setRenameInput"
+          type="text"
+          class="min-w-0 flex-1 rounded border border-accent-strong bg-bg px-1 font-mono text-ui text-fg outline-none"
+          :value="entry.name"
+          spellcheck="false"
+          autocomplete="off"
+          @keydown="onRenameKey"
+          @blur="onRenameBlur"
+          @mousedown.stop
+          @click.stop
+          @dblclick.stop
+        />
         <span
+          v-else
           class="min-w-0 flex-1 truncate"
           :class="controller.isSelected(entry) ? 'text-selected' : ''"
           :title="entry.path"

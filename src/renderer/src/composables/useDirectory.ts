@@ -20,6 +20,12 @@ export interface PaneState {
   selected: Set<string>
   loading: boolean
   error: string | null
+  /**
+   * Path of the entry currently being renamed in place, or null. The row list
+   * keys off this to swap the name cell for an input; it is null whenever the
+   * pane is not editing.
+   */
+  renaming: string | null
 }
 
 export interface PaneController {
@@ -43,9 +49,23 @@ export interface PaneController {
   openSearch(): void
   updateSearch(query: string): void
   closeSearch(): void
+  beginRename(): void
+  cancelRename(): void
+  commitRename(name: string): Promise<void>
 }
 
 const PARENT_LABEL = '..'
+
+/**
+ * The renderer has no `node:path` (contextIsolation is on), but rename only
+ * needs the containing directory of an absolute path so it can rebuild the
+ * target from the new basename. Both separators are handled so a Windows path
+ * still lands in the same folder.
+ */
+function parentOf(target: string): string {
+  const slash = Math.max(target.lastIndexOf('/'), target.lastIndexOf('\\'))
+  return slash > 0 ? target.slice(0, slash) : target
+}
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
 
@@ -101,7 +121,8 @@ export function useDirectory(side: PanelSide): PaneController {
     searchQuery: '',
     selected: new Set<string>(),
     loading: false,
-    error: null
+    error: null,
+    renaming: null
   })
 
   function current(): PaneEntry | undefined {
@@ -157,6 +178,61 @@ export function useDirectory(side: PanelSide): PaneController {
     applyFilter()
   }
 
+  /**
+   * Start an in-place rename on the entry under the cursor. A filter is closed
+   * first so the row stays in the list, and the ".." row is never renamed.
+   */
+  function beginRename(): void {
+    const entry = current()
+    if (!entry || entry.isParent) return
+    if (state.searchActive) closeSearch()
+    state.renaming = entry.path
+  }
+
+  function cancelRename(): void {
+    state.renaming = null
+  }
+
+  /**
+   * Commit the edited name. The argument is the raw input value — the basename
+   * the user typed, not a path. An unchanged or empty name is a no-op, and a
+   * failure (collision, permissions) surfaces through the pane's error line
+   * while leaving the directory untouched.
+   */
+  async function commitRename(name: string): Promise<void> {
+    const source = state.renaming
+    state.renaming = null
+    if (!source) return
+
+    const next = name.trim()
+    if (!next) return
+    if (next.includes('/') || next.includes('\\')) {
+      state.error = 'EINVAL: A name cannot contain a path separator'
+      return
+    }
+    if (next === '.' || next === '..') {
+      state.error = 'EINVAL: Reserved name'
+      return
+    }
+
+    const target = `${parentOf(source)}/${next}`
+    if (target === source) {
+      state.error = null
+      return
+    }
+
+    const result = await window.bipane.fs.rename(source, target)
+    if (!result.ok) {
+      state.error = `${result.error.code}: ${result.error.message}`
+      return
+    }
+
+    state.error = null
+    // Land the cursor on the renamed entry rather than the path it used to
+    // have, which no longer exists.
+    await navigateTo(state.path, result.data)
+  }
+
   async function navigateTo(dir: string, focusPath?: string): Promise<void> {
     state.loading = true
     state.error = null
@@ -182,6 +258,7 @@ export function useDirectory(side: PanelSide): PaneController {
     state.searchActive = false
     state.searchQuery = ''
     state.selected.clear()
+    state.renaming = null
   }
 
   function indexOfPath(rows: PaneEntry[], target: string): number {
@@ -362,6 +439,9 @@ export function useDirectory(side: PanelSide): PaneController {
     deleteEntries,
     openSearch,
     updateSearch,
-    closeSearch
+    closeSearch,
+    beginRename,
+    cancelRename,
+    commitRename
   }
 }

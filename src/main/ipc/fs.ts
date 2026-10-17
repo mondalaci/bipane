@@ -98,6 +98,46 @@ export function registerFsHandlers(): void {
   })
 
   ipcMain.handle(
+    'fs:rename',
+    async (_event, source: string, target: string): Promise<Result<string>> => {
+      try {
+        if (typeof source !== 'string' || typeof target !== 'string') {
+          return { ok: false, error: { code: 'EINVAL', message: 'Invalid rename arguments' } }
+        }
+
+        const from = path.resolve(source)
+        const to = path.resolve(target)
+
+        if (from === to) return { ok: true, data: to }
+
+        if (from === path.parse(from).root) {
+          return {
+            ok: false,
+            error: { code: 'EPERM', message: 'Refusing to rename a filesystem root' }
+          }
+        }
+
+        // `rename` would silently clobber an existing target on POSIX, so make
+        // the collision an error the pane can surface instead of data loss.
+        try {
+          await fs.lstat(to)
+          return {
+            ok: false,
+            error: { code: 'EEXIST', message: `"${path.basename(to)}" already exists` }
+          }
+        } catch {
+          // Target is free — proceed.
+        }
+
+        await fs.rename(from, to)
+        return { ok: true, data: to }
+      } catch (error) {
+        return { ok: false, error: toFsError(error) }
+      }
+    }
+  )
+
+  ipcMain.handle(
     'fs:delete',
     async (_event, targets: string[]): Promise<Result<DeleteOutcome>> => {
       const deleted: string[] = []

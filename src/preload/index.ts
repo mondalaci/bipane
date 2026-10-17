@@ -15,6 +15,8 @@ const api: BipaneApi = {
     list: (dir: string): Promise<Result<DirListing>> => ipcRenderer.invoke('fs:list', dir),
     open: (target: string) => ipcRenderer.invoke('fs:open', target),
     reveal: (target: string) => ipcRenderer.invoke('fs:reveal', target),
+    rename: (source: string, target: string): Promise<Result<string>> =>
+      ipcRenderer.invoke('fs:rename', source, target),
     remove: (targets: string[]): Promise<Result<DeleteOutcome>> =>
       ipcRenderer.invoke('fs:delete', targets)
   },
