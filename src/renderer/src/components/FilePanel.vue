@@ -213,10 +213,15 @@ function onRenameBlur(): void {
 </script>
 
 <template>
-  <section class="flex min-w-0 flex-1 flex-col" @mousedown="onPointerDown" @contextmenu.prevent>
+  <section
+    class="flex min-w-0 flex-1 flex-col border"
+    :class="active ? 'border-accent' : 'border-transparent'"
+    @mousedown="onPointerDown"
+    @contextmenu.prevent
+  >
     <div
       class="flex h-7 shrink-0 items-center gap-2 border-b border-border-subtle px-3"
-      :class="active ? 'bg-title-active text-fg-bright' : 'bg-surface text-fg-dim'"
+      :class="active ? 'bg-accent text-fg-bright' : 'bg-surface text-fg-dim'"
     >
       <span class="truncate font-mono text-ui-sm" :title="controller.state.path">
         {{ controller.state.path || '—' }}
