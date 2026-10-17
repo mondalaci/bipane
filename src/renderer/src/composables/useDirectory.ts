@@ -61,6 +61,8 @@ export interface PaneController {
   beginRename(): void
   cancelRename(): void
   commitRename(name: string): Promise<void>
+  beginSelfChange(): void
+  endSelfChange(): void
 }
 
 const PARENT_LABEL = '..'
@@ -129,6 +131,15 @@ const FLASH_MS = 1600
  * the list to say nothing useful, so such a batch is not highlighted at all.
  */
 const FLASH_MAX = 150
+
+/**
+ * How long a pane keeps ignoring changes after a user-initiated one ends. The
+ * directory watcher debounces for up to 750ms, so its notification for the same
+ * write arrives after the operation's own re-list; this tail keeps that
+ * follow-up from re-announcing what the user just caused. A change made by
+ * another program after the tail still sweeps.
+ */
+const QUIET_TAIL_MS = 1000
 
 /**
  * Which entries a re-list found new or altered, by path. "Altered" is a changed
@@ -295,6 +306,17 @@ export function useDirectory(side: PanelSide): PaneController {
    */
   let flashTimer: number | null = null
 
+  /**
+   * Nesting depth of user-initiated changes currently in flight. While it is
+   * non-zero the pane's listing still updates, but nothing sweeps: the entries a
+   * copy, move or shell command makes are ones the user asked for, and the
+   * watcher reports them exactly like an external writer would. `quietUntil`
+   * carries that silence past the end of the operation so the watcher's delayed
+   * notification is covered too.
+   */
+  let selfChanges = 0
+  let quietUntil = 0
+
   function clearFresh(): void {
     if (flashTimer !== null) {
       window.clearTimeout(flashTimer)
@@ -304,6 +326,12 @@ export function useDirectory(side: PanelSide): PaneController {
   }
 
   function markFresh(paths: Set<string>): void {
+    // A change the pane itself just made is not news: the sweep exists to
+    // announce entries that appeared behind the app's back, so a copy, move or
+    // `mkdir` the user issued must not animate. Both the operation's own
+    // re-list and the watcher's delayed notification for it land inside the
+    // quiet window this guards.
+    if (selfChanges > 0 || Date.now() < quietUntil) return
     if (paths.size === 0 || paths.size > FLASH_MAX) return
     for (const path of paths) state.fresh.add(path)
 
@@ -312,6 +340,22 @@ export function useDirectory(side: PanelSide): PaneController {
       flashTimer = null
       state.fresh.clear()
     }, FLASH_MS)
+  }
+
+  /**
+   * Mark the start of a change this pane is making because the user asked for
+   * it — a transfer, or a command typed at the prompt — so its result is not
+   * swept. Nested calls are counted, so overlapping operations are all covered;
+   * the matching `endSelfChange` starts the quiet tail.
+   */
+  function beginSelfChange(): void {
+    selfChanges += 1
+  }
+
+  function endSelfChange(): void {
+    if (selfChanges === 0) return
+    selfChanges -= 1
+    if (selfChanges === 0) quietUntil = Date.now() + QUIET_TAIL_MS
   }
 
   function unwatchCurrent(): void {
@@ -633,6 +677,8 @@ export function useDirectory(side: PanelSide): PaneController {
     closeSearch,
     beginRename,
     cancelRename,
-    commitRename
+    commitRename,
+    beginSelfChange,
+    endSelfChange
   }
 }

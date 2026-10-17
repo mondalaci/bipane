@@ -185,15 +185,36 @@ function cancelCopy(): void {
   focusPanes()
 }
 
+/**
+ * The panes a transfer's new entries can appear in. The target always gains
+ * them; the source does too when the destination field names something main
+ * will resolve inside it — a relative path like `sub` becomes `<source>/sub`,
+ * so a folder appears in the source pane. Both are marked as making the change
+ * themselves, so neither sweeps what the user just copied or moved in.
+ */
+function transferPanes(
+  source: PaneController,
+  target: PaneController,
+  destination: string
+): PaneController[] {
+  return destination.startsWith('/') ? [target] : [source, target]
+}
+
 async function confirmCopy(destination: string): Promise<void> {
   const source = activePane.value
   const target = inactivePane.value
   copyJob.value = null
 
-  // The handler resolves a relative destination against the source pane, so the
-  // resolved directory is what a pane showing it must be compared against.
-  const resolved = await source.copyEntries(destination)
-  if (resolved && target.state.path === resolved) await target.refresh()
+  const panes = transferPanes(source, target, destination)
+  for (const pane of panes) pane.beginSelfChange()
+  try {
+    // The handler resolves a relative destination against the source pane, so
+    // the resolved directory is what a pane showing it must be compared against.
+    const resolved = await source.copyEntries(destination)
+    if (resolved && target.state.path === resolved) await target.refresh()
+  } finally {
+    for (const pane of panes) pane.endSelfChange()
+  }
   focusPanes()
 }
 
@@ -219,8 +240,14 @@ async function confirmMove(destination: string): Promise<void> {
   const target = inactivePane.value
   moveJob.value = null
 
-  const resolved = await source.moveEntries(destination)
-  if (resolved && target.state.path === resolved) await target.refresh()
+  const panes = transferPanes(source, target, destination)
+  for (const pane of panes) pane.beginSelfChange()
+  try {
+    const resolved = await source.moveEntries(destination)
+    if (resolved && target.state.path === resolved) await target.refresh()
+  } finally {
+    for (const pane of panes) pane.endSelfChange()
+  }
   focusPanes()
 }
 
@@ -309,8 +336,35 @@ function refreshPanelsAtShellCwd(): void {
   }
 }
 
+/**
+ * A command typed at the prompt is a change the user asked for, so the panes
+ * showing the shell's directory are marked as making it themselves: `mkdir foo`
+ * would otherwise sweep `foo` exactly like a file another program wrote. They
+ * stay quiet while the command runs and for a short tail after it, which also
+ * covers the watcher's delayed notification for the same change. This is only
+ * ever the directories the shell is actually in — a download finishing
+ * elsewhere still sweeps.
+ */
+const shellPanes = new Set<PaneController>()
+
+function muteShellPanes(): void {
+  const dir = shellCwd.value
+  if (!dir) return
+  for (const pane of [left.value, right.value]) {
+    if (pane.state.path !== dir || shellPanes.has(pane)) continue
+    shellPanes.add(pane)
+    pane.beginSelfChange()
+  }
+}
+
+function unmuteShellPanes(): void {
+  for (const pane of shellPanes) pane.endSelfChange()
+  shellPanes.clear()
+}
+
 function noteCommandSubmitted(): void {
   commandPending = true
+  muteShellPanes()
   if (commandSettleTimer !== null) window.clearTimeout(commandSettleTimer)
   commandSettleTimer = window.setTimeout(() => {
     commandSettleTimer = null
@@ -323,6 +377,7 @@ async function settleCommand(): Promise<void> {
   await shell.refreshState()
   if (!commandPending || !shellIdle.value) return
   commandPending = false
+  unmuteShellPanes()
   refreshPanelsAtShellCwd()
 }
 
@@ -331,7 +386,16 @@ watch(shellCommand, noteCommandSubmitted)
 watch(shellIdle, (idleNow) => {
   if (!idleNow || !commandPending) return
   commandPending = false
+  unmuteShellPanes()
   refreshPanelsAtShellCwd()
+})
+
+// A shell that dies mid-command never reaches idle, so nothing else would
+// release the muting. Resuming on exit keeps the sweep working afterwards.
+watch(shellStarted, (started) => {
+  if (started) return
+  commandPending = false
+  unmuteShellPanes()
 })
 
 /**

@@ -134,6 +134,18 @@ it edits the line, and reaching the parent is the `..` row's job.
   one period per cycle — a single band with a blank tail leaves a dead beat
   between passes, which reads as the animation stalling. A batch over 150
   entries is skipped so a big copy or checkout cannot animate hundreds of rows.
+- **Only changes made behind the app's back sweep.** A copy, move or `mkdir`
+  the user asked for must not animate its own result, and the watcher reports
+  those changes exactly like an external writer would, so the app marks the
+  panes involved as making the change themselves: `beginSelfChange` /
+  `endSelfChange` in `useDirectory` silence `markFresh` while the operation runs
+  and for a 1000ms tail afterwards (enough to cover the watcher's debounce), so
+  neither the operation's own re-list nor the watcher's delayed notification
+  flashes. `App.vue` wraps the F5/F6 transfer on both panes (the target always
+  gains entries, the source too when the destination is a relative path), and
+  mutes the panes at the shell's directory from a submitted command until it
+  finishes and settles. A download in another directory, or one that starts
+  after the tail, still sweeps; so does `Ctrl+R`.
 - **Intercepted keys must `stopPropagation`, not just `preventDefault`.** xterm
   handles keys from a capture listener on its own textarea and does *not* consult
   `defaultPrevented`, so a merely-prevented navigation key is still forwarded to
