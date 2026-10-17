@@ -56,7 +56,10 @@ right-click marks a row and dragging the held button paints that mark across
 rows, `Ctrl+O` toggles the terminal, `Ctrl+R` re-lists the active pane,
 `Ctrl+U` swaps the two panels (each keeps its cursor, marks and filter),
 `Alt+S` starts an incremental search, `F5` copies the marked entries (or the
-cursor row) into the other pane, `F6` moves them there, `Shift+F6` renames the
+cursor row) into the other pane, `F6` moves them there (its destination field
+names a directory to move into, but for a single entry a path that is not a
+directory is the entry's new name — so `blah` -> `blah2` renames, and a
+trailing separator, `blah2/`, asks for a folder instead), `Shift+F6` renames the
 cursor row in place, and `F8` deletes them after confirmation.
 `Backspace` never navigates: it belongs to the shell's line
 editor (or the search box), so the `..` row is the way up.

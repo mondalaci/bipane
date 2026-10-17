@@ -359,28 +359,73 @@ export function registerFsHandlers(): void {
       // for copy: typing `sub` must mean `<pane>/sub`.
       const base =
         typeof baseDir === 'string' && baseDir.length > 0 ? path.resolve(baseDir) : process.cwd()
-      const destDir = path.isAbsolute(destination)
+      const dest = path.isAbsolute(destination)
         ? path.resolve(destination)
         : path.resolve(base, destination)
 
-      // Create a destination the dialog named but that does not exist yet, so
-      // typing a fresh folder name works instead of failing on a missing parent.
+      const valid = sources.filter(
+        (source): source is string => typeof source === 'string' && source.length > 0
+      )
+
+      // A trailing separator means "a directory", the way a shell reads it, and
+      // is how one asks for a fresh folder when a single entry could also be a
+      // rename.
+      const forceDirectory = /[/\\]$/.test(destination)
+
+      let destStats: Stats | null = null
       try {
-        await fs.mkdir(destDir, { recursive: true })
-      } catch (error) {
-        return { ok: false, error: toFsError(error) }
+        destStats = await fs.lstat(dest)
+      } catch {
+        destStats = null
       }
 
+      // The destination is a directory to move *into* when it already is one, or
+      // when a path that does not exist yet can only be a folder because several
+      // entries share it (a trailing separator asks for the same). Otherwise —
+      // a single entry naming a path that is not a directory — it is the entry's
+      // new name: `blah` -> `blah2` renames, rather than making a `blah2` folder
+      // and moving `blah` inside it.
+      const intoDirectory =
+        (destStats?.isDirectory() ?? false) ||
+        (!destStats && (forceDirectory || valid.length > 1))
+
+      if (intoDirectory && destStats && !destStats.isDirectory()) {
+        return {
+          ok: false,
+          error: { code: 'ENOTDIR', message: `"${path.basename(dest)}" is not a directory` }
+        }
+      }
+
+      if (!intoDirectory && valid.length > 1) {
+        return {
+          ok: false,
+          error: {
+            code: 'ENOTDIR',
+            message: 'Moving several entries needs an existing destination directory'
+          }
+        }
+      }
+
+      // A folder destination the dialog named but that does not exist yet is
+      // created, so typing a fresh folder name works instead of failing on a
+      // missing parent.
+      if (intoDirectory && !destStats) {
+        try {
+          await fs.mkdir(dest, { recursive: true })
+        } catch (error) {
+          return { ok: false, error: toFsError(error) }
+        }
+      }
+
+      const destDir = intoDirectory ? dest : path.dirname(dest)
       const moved: string[] = []
       const failed: MoveFailure[] = []
 
-      for (const source of sources) {
-        if (typeof source !== 'string' || source.length === 0) continue
-
+      for (const source of valid) {
         const from = path.resolve(source)
-        const to = path.join(destDir, path.basename(from))
+        const to = intoDirectory ? path.join(dest, path.basename(from)) : dest
 
-        // Moving an entry into its own directory leaves it where it is.
+        // Moving an entry to where it already is leaves it where it is.
         if (from === to) continue
 
         if (from === path.parse(from).root) {
@@ -392,15 +437,17 @@ export function registerFsHandlers(): void {
         }
 
         try {
-          // Never silently clobber: an existing name in the destination is a
-          // per-entry failure, exactly like copy and rename.
+          // Never silently clobber: an existing name is a per-entry failure,
+          // exactly like copy and rename.
           try {
             await fs.lstat(to)
             failed.push({
               path: from,
               error: {
                 code: 'EEXIST',
-                message: `"${path.basename(to)}" already exists in "${destDir}"`
+                message: intoDirectory
+                  ? `"${path.basename(to)}" already exists in "${destDir}"`
+                  : `"${path.basename(to)}" already exists`
               }
             })
             continue
