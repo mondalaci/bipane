@@ -172,6 +172,13 @@ const PREVIEW_HEIGHT = 64
 const PREVIEW_MAX_WIDTH = 160
 
 /**
+ * How long the footer takes to change size — both the classes below and the
+ * scroll that follows it read this, since the listing is short of the row's
+ * space for exactly that long.
+ */
+const FOOTER_RESIZE_MS = 150
+
+/**
  * The reserved box: the hinted ratio at the preview's height, capped at the
  * preview's width (a very wide picture letterboxes rather than pushing the rest
  * of the bar off the strip). Without a hint the box is the full cap and the
@@ -1604,6 +1611,29 @@ function scrollRowIntoView(index: number, align: ScrollAlign): void {
   }
 }
 
+/**
+ * Bring the cursor row back into view for as long as the footer is taking the
+ * space it needs (or giving it back). The strip's own height is what the
+ * listing is measured against, so on a move onto media near the bottom the
+ * scroll has to follow it: a single adjustment when the cursor lands would be
+ * measured against the size the listing still has, and the row would be covered
+ * as the footer grows over it. Following the transition keeps the row at the
+ * bottom edge rather than stepping into the strip's way and out again.
+ */
+let footerFollowFrame = 0
+
+function followFooterResize(cursor: number, align: ScrollAlign): void {
+  if (footerFollowFrame !== 0) cancelAnimationFrame(footerFollowFrame)
+  const until = performance.now() + FOOTER_RESIZE_MS
+
+  const step = (): void => {
+    scrollRowIntoView(cursor, align)
+    footerFollowFrame = performance.now() < until ? requestAnimationFrame(step) : 0
+  }
+
+  footerFollowFrame = requestAnimationFrame(step)
+}
+
 watch(
   [() => props.controller.state.path, () => props.controller.state.cursor],
   async () => {
@@ -1611,6 +1641,7 @@ watch(
     props.controller.state.scrollAlign = 'nearest'
     await nextTick()
     scrollRowIntoView(cursor, scrollAlign)
+    followFooterResize(cursor, scrollAlign)
   }
 )
 
@@ -1634,6 +1665,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   listObserver?.disconnect()
   listObserver = null
+  if (footerFollowFrame !== 0) cancelAnimationFrame(footerFollowFrame)
+  footerFollowFrame = 0
   stageAreaObserver?.disconnect()
   stageAreaObserver = null
   stageBarObserver?.disconnect()
@@ -1903,8 +1936,9 @@ function onRenameBlur(): void {
       </ul>
 
       <div
-        class="flex shrink-0 items-center justify-between gap-3 border-t border-border-subtle bg-surface px-3 text-ui-sm text-fg-dim"
-        :class="footerTall ? 'py-1' : 'h-6'"
+        class="flex shrink-0 items-center justify-between gap-3 overflow-hidden border-t border-border-subtle bg-surface px-3 text-ui-sm text-fg-dim transition-[height] ease-out"
+        :class="footerTall ? 'h-[4.5rem] py-1' : 'h-6'"
+        :style="{ transitionDuration: `${FOOTER_RESIZE_MS}ms` }"
       >
         <div class="flex min-w-0 items-center gap-3">
           <!-- Shown/hidden with `v-show`, not `v-if`: a video hidden this way is

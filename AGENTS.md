@@ -225,7 +225,12 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   a `data:` URL (the renderer CSP allows `img-src data:` but not `file:`), and
   `FilePanel` reserves the space from the moment the cursor lands on media — the
   extension says it is, before anything has been read — so stepping between clips
-  never collapses the footer and pushes the list back up. Inside that space the
+  never collapses the footer and pushes the list back up. The strip itself moves
+  between its two sizes — the 1.5rem status bar and the 4.5rem one carrying a
+  preview box — in a quick animation of its own height, and the listing's scroll
+  follows that animation frame by frame for as long as it runs, so a cursor
+  landing on media near the bottom is not covered as the strip grows over it.
+  Inside that space the
   box is held at the shape of the row just left until the new one is known, so it
   neither blinks between rows nor is ever drawn at a shape it is about to leave;
   only the first media row of a run, whose shape has never been known, shows a
