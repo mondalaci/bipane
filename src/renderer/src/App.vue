@@ -110,17 +110,17 @@ const stageTarget = computed(() => {
 })
 
 /**
- * The reveal is for arriving at a display, not for every row the cursor crosses
- * while one is up: this counts the times the display goes from empty to full.
+ * The reveal is for arriving in the mode, not for every row the cursor crosses
+ * while one is up: this counts the times a display is asked for, so that the
+ * media growing out of its thumbnail is the gesture of entering the mode — and
+ * of the cursor coming back onto a file that has something to show, where
+ * nothing grew out of a thumbnail in the first place.
  */
 const stageAnimation = ref(0)
 
-watch(
-  () => stageTarget.value !== null,
-  (present) => {
-    if (present) stageAnimation.value += 1
-  }
-)
+watch(stageSide, (side) => {
+  if (side !== null) stageAnimation.value += 1
+})
 
 const leftPanel = ref<InstanceType<typeof FilePanel> | null>(null)
 const rightPanel = ref<InstanceType<typeof FilePanel> | null>(null)

@@ -298,7 +298,11 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   pane's `previewRect()`), and released. It plays once per *entry* into the mode,
   guarded by `stage.animation`, so arrowing through a folder swaps the display in
   place rather than re-animating on every row — and a row whose thumbnail is not
-  up yet has nothing to grow from, so it simply appears. Leaving the mode plays
+  up yet has nothing to grow from, so it simply appears. The gesture is for
+  entering the mode and leaving it, not for the cursor crossing a row: a display
+  that has nothing to show for a row empties at once (no shrink onto a thumbnail
+  that never held it), and coming back onto a media file fills it again without
+  the reveal — nothing grew out of that thumbnail either. Leaving the mode plays
   the same gesture backwards and waits for it: the media shrinks back onto the
   thumbnail it came from and is only taken off screen when it has arrived, so
   `FilePanel` holds the request it is showing (`shownStage`) past the prop that

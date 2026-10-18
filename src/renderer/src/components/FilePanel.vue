@@ -382,6 +382,9 @@ const stageMedia = ref<HTMLImageElement | HTMLVideoElement | null>(null)
 /** The dismissal in flight, so that a display asked for again can call it off. */
 let stageDismissal: Animation | null = null
 
+/** Whether a dismissal is running, so that its gesture is neither doubled nor cut short. */
+let stageDismissing = false
+
 /** Which sound ramp is the current one, so a leaving one stops when another starts. */
 let stageSound = 0
 
@@ -408,6 +411,10 @@ watch(
       ],
       { duration: STAGE_REVEAL_MS, easing: displaying ? 'ease-out' : 'ease-in', fill: 'forwards' }
     )
+
+    // Leaving the mode is what takes a displayed clip away: whatever is up
+    // shrinks back onto its thumbnail, which by then is the pane's own again.
+    if (displaying !== true && shownStage.value !== null) void dismissStage()
   }
 )
 
@@ -429,7 +436,29 @@ watch(
       void loadStage(stage)
       return
     }
-    if (shownStage.value !== null) void dismissStage()
+    if (shownStage.value === null) return
+
+    // The mode is being left, and whatever is up shrinks back onto its
+    // thumbnail. It is asked for from here as well as from the mode's own watch,
+    // because the two arrive in one flush and either may be first; the dismissal
+    // runs once either way.
+    if (props.displaying !== true) {
+      void dismissStage()
+      return
+    }
+
+    // Nothing under the cursor to show, with the mode still on: the display
+    // empties without a gesture. That gesture belongs to arriving in the mode and
+    // leaving it, not to the cursor crossing a file there is nothing to show for
+    // — nothing grew out of that thumbnail, so shrinking back onto it would make
+    // no sense.
+    if (stageDismissing) return
+
+    stageDismissal?.cancel()
+    stageDismissal = null
+    shownStage.value = null
+    stageState.value = 'idle'
+    emit('stage-clock', null)
   },
   { immediate: true }
 )
@@ -568,6 +597,17 @@ function onStageShown(): void {
  * until this is done, because the element has to still be there to move.
  */
 async function dismissStage(): Promise<void> {
+  if (stageDismissing) return
+  stageDismissing = true
+
+  try {
+    await runDismissal()
+  } finally {
+    stageDismissing = false
+  }
+}
+
+async function runDismissal(): Promise<void> {
   const stage = shownStage.value
   const element = stageMedia.value
 
