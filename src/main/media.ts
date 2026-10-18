@@ -1,9 +1,7 @@
-import { createHash } from 'node:crypto'
-import { createReadStream, promises as fs, rmSync, type Stats } from 'node:fs'
-import * as path from 'node:path'
+import { createReadStream, promises as fs, type Stats } from 'node:fs'
 import { Readable } from 'node:stream'
 import { spawn, type ChildProcess } from 'node:child_process'
-import { app, ipcMain, protocol } from 'electron'
+import { ipcMain, protocol } from 'electron'
 import { MEDIA_SCHEME, needsTranscode, videoMimeFor } from '@shared/video'
 
 /**
@@ -24,40 +22,23 @@ const FFMPEG = process.env['BIPANE_FFMPEG'] ?? 'ffmpeg'
 const FFPROBE = process.env['BIPANE_FFPROBE'] ?? 'ffprobe'
 
 /**
- * How much of a clip a transcode covers, and how wide its output may be. Both
- * are what keep the work proportionate to a *preview*: the clip is stepping
- * distance for the arrow keys, so it has to cover what a person would scrub
- * through — a camcorder AVI is minutes long, and a twenty-second clip made every
- * step land on its end — but not the whole of a feature-length file, which is
- * neither worth encoding to fill a 64px box nor worth keeping in the temp
- * directory. The width cap keeps the encode small: a 4K source is encoded at
- * 720px at most, which the panes scale down anyway.
+ * How wide a transcoded clip's output may be. A 4K source is encoded at 720px at
+ * most, which the panes scale down anyway, and the width is what keeps the
+ * encode small enough to keep ahead of playback.
  */
-const TRANSCODE_SECONDS = 300
 const TRANSCODE_MAX_WIDTH = 720
 
 /**
- * A transcode that has not finished by now is a transcode to give up on — a
- * stuck ffmpeg would otherwise hold a preview's request open forever. It is a
- * guard against a hang, not a performance budget: a long clip in a heavy codec
- * is allowed to take a while.
+ * How long an encode may go unread before it is stopped, and how often that is
+ * looked at. An encode writes as fast as it can and is read only as fast as the
+ * clip is played, so it spends its life with a full pipe: what this catches is a
+ * response the element has walked away from, whose frames nobody is coming back
+ * for. Chromium holds a media response open for a while after the element that
+ * asked for it has gone, so the process cannot rely on the request being
+ * cancelled to know that it is finished with.
  */
-const TRANSCODE_TIMEOUT_MS = 600_000
-
-/**
- * How many transcoded clips are kept, and how much of the temp directory they
- * may take between them. A few small encodes are what makes stepping back and
- * forth over a folder of old AVIs free rather than a transcode a row; the byte
- * budget is for the long clips, whose encodes are not small.
- */
-const TRANSCODE_CACHE_ENTRIES = 12
-const TRANSCODE_CACHE_BYTES = 200 * 1024 * 1024
-
-/**
- * How often a response waiting on an encode in progress looks for the next of
- * it. Small enough to keep a stream fed, large enough not to spin on a stat.
- */
-const TRANSCODE_POLL_MS = 40
+const TRANSCODE_IDLE_MS = 30_000
+const TRANSCODE_IDLE_CHECK_MS = 5_000
 
 /**
  * The scheme a video preview streams through, registered before the app is
@@ -72,6 +53,16 @@ export function registerMediaScheme(): void {
       privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true }
     }
   ])
+}
+
+/**
+ * Where a request asked a transcode to start, in seconds: a whole number of them
+ * or a fraction, and never negative. Anything else — an absent parameter, a
+ * blank one, a word — means the beginning.
+ */
+function startOffsetFromUrl(url: URL): number {
+  const from = Number.parseFloat(url.searchParams.get('from') ?? '')
+  return Number.isFinite(from) && from > 0 ? from : 0
 }
 
 /**
@@ -188,59 +179,26 @@ export function ffmpegAvailable(): Promise<boolean> {
   return available
 }
 
-/** Where this run's transcodes go, thrown away when the app is. */
-let transcodeDir: string | null = null
-
-/** Completed transcodes, by the identity of what they were made from. */
-const transcodes = new Map<string, { path: string; bytes: number }>()
-
-/** Transcodes still being written, so every request about a clip joins one run. */
-const running = new Map<string, Transcode>()
-
 const children = new Set<ChildProcess>()
 
 /**
- * This run's transcode directory, made on first use. Any directory a previous
- * run left behind is removed first: the app holds a single-instance lock, so
- * none of them can belong to another instance still running.
- */
-async function transcodeDirectory(): Promise<string> {
-  if (transcodeDir !== null) return transcodeDir
-
-  const root = app.getPath('temp')
-  const mine = `bipane-media-${process.pid}`
-  try {
-    for (const entry of await fs.readdir(root)) {
-      if (!entry.startsWith('bipane-media-')) continue
-      await fs.rm(path.join(root, entry), { recursive: true, force: true })
-    }
-  } catch {
-    // Sweeping is housekeeping; failing it must not stop a preview.
-  }
-
-  const dir = path.join(root, mine)
-  await fs.mkdir(dir, { recursive: true })
-  transcodeDir = dir
-  return dir
-}
-
-/** An encode in progress: where it is being written, and when it is finished. */
-interface Transcode {
-  path: string
-  done: Promise<void>
-}
-
-/**
- * Transcode a clip to something Chromium plays, streaming it out as it is
- * produced rather than waiting for the whole of it. A preview must not sit on a
- * black box while a three-minute clip is decoded to its end — the first
- * fragments are playable, so they are what the element is handed, and the encode
- * carries on behind it.
+ * Serve a clip Chromium cannot play, encoded as it is watched.
  *
- * The encode is deliberately modest: H.264 at most 720px wide, at most five
- * minutes of it, and no audio at all (a preview never makes a sound).
+ * The encode is a *stream*, from `from` to the end of the file — not a clip cut
+ * short, and not something finished before it is played. A feature-length file
+ * is something to watch, so it starts in a fraction of a second like anything
+ * else, and nothing is written to disk: a two-hour encode is not something to
+ * keep. The sound is encoded with it, because the display is watched *and*
+ * heard; the footer's thumbnail is muted by the element that plays it.
+ *
+ * `from` is also the whole of seeking. A live stream reports no range to move
+ * within, so there is nothing for the element to seek *to*: the way to move
+ * about the clip is to ask for the stream again at the position wanted, which is
+ * what `from` is for. The element counts from the start of whatever it was
+ * given — a stream is rebased to zero however its timestamps are written — so
+ * the pane that asked for it adds the offset back on to say where the clip is.
  */
-function startTranscode(target: string, key: string, path: string): Transcode {
+function serveTranscode(target: string, from: number, method: string): Response {
   const child = spawn(
     FFMPEG,
     [
@@ -248,11 +206,19 @@ function startTranscode(target: string, key: string, path: string): Transcode {
       '-loglevel',
       'error',
       '-nostdin',
+      // Seeking to the position before reading, so the stream is the clip from
+      // `from` onwards.
+      '-ss',
+      String(from),
       '-i',
       target,
-      '-t',
-      String(TRANSCODE_SECONDS),
-      '-an',
+      // The audio travels with it: a footer thumbnail is muted by the element
+      // that plays it, but a display is watched and heard, and a clip stripped
+      // of its sound here could never be heard there.
+      '-c:a',
+      'aac',
+      '-b:a',
+      '128k',
       '-vf',
       `scale='min(${TRANSCODE_MAX_WIDTH},iw)':-2`,
       '-c:v',
@@ -265,8 +231,7 @@ function startTranscode(target: string, key: string, path: string): Transcode {
       'yuv420p',
       // A keyframe often enough that the first playable fragment arrives within
       // a fraction of a second, and a fragmented file so later fragments can
-      // follow it down the same response — a plain mp4 has no header until the
-      // encode ends, so nothing of it could be played early at all.
+      // follow it down the same response.
       '-g',
       '30',
       '-movflags',
@@ -275,167 +240,54 @@ function startTranscode(target: string, key: string, path: string): Transcode {
       '1',
       '-f',
       'mp4',
-      path
+      '-'
     ],
-    { stdio: ['ignore', 'ignore', 'pipe'] }
+    { stdio: ['ignore', 'pipe', 'ignore'] }
   )
   children.add(child)
 
-  const timer = setTimeout(() => child.kill('SIGKILL'), TRANSCODE_TIMEOUT_MS)
-  let complaint = ''
-  child.stderr?.on('data', (chunk: Buffer) => {
-    complaint = (complaint + chunk.toString()).slice(-500)
-  })
-
-  const done = (async () => {
-    const code = await new Promise<number | null>((resolve) => {
-      child.once('error', () => resolve(null))
-      child.once('close', (status) => resolve(status))
-    })
-    clearTimeout(timer)
-    children.delete(child)
-
-    if (code !== 0) {
-      if (complaint.trim() !== '') console.error(`[media] ffmpeg: ${complaint.trim()}`)
-      // A half-written file is not a preview of anything.
-      await fs.rm(path, { force: true }).catch(() => {})
+  // Nothing is ever read from an encode nobody is watching, so its pipe fills
+  // and stays full: a reader that has moved on is a queue that stops changing.
+  let queued = -1
+  let lastProgress = Date.now()
+  const reaper = setInterval(() => {
+    const length = child.stdout?.readableLength ?? 0
+    if (length !== queued) {
+      queued = length
+      lastProgress = Date.now()
       return
     }
+    if (Date.now() - lastProgress >= TRANSCODE_IDLE_MS) child.kill('SIGKILL')
+  }, TRANSCODE_IDLE_CHECK_MS)
 
-    try {
-      const { size } = await fs.stat(path)
-      transcodes.delete(key)
-      transcodes.set(key, { path, bytes: size })
-      let kept = 0
-      for (const entry of transcodes.values()) kept += entry.bytes
-      while (transcodes.size > TRANSCODE_CACHE_ENTRIES || kept > TRANSCODE_CACHE_BYTES) {
-        const oldest = transcodes.keys().next()
-        if (oldest.done) break
-        const stale = transcodes.get(oldest.value)
-        transcodes.delete(oldest.value)
-        kept -= stale?.bytes ?? 0
-        // Unlinking a file another response is still reading is safe: the
-        // descriptor it holds outlives the name.
-        if (stale !== undefined) await fs.rm(stale.path, { force: true }).catch(() => {})
-      }
-    } catch {
-      // Nothing to remember if the file cannot even be measured.
-    }
-  })()
-
-  return { path, done }
-}
-
-/**
- * The encode for a clip: the one already running, or a new one. One encode per
- * clip however many elements ask for it — a display and a footer showing the
- * same file are one job, not two.
- */
-async function transcodeFor(target: string, key: string): Promise<Transcode> {
-  const started = running.get(key)
-  if (started !== undefined) return started
-
-  const dir = await transcodeDirectory()
-  const name = createHash('sha1').update(key).digest('hex').slice(0, 16)
-  const job = startTranscode(target, key, path.join(dir, `${name}.mp4`))
-  running.set(key, job)
-  void job.done.finally(() => running.delete(key))
-  return job
-}
-
-/**
- * Yield what has been written so far, and go on doing it until the encode is
- * finished and there is nothing more to come — which is what makes a response
- * carry the first playable fragments while the rest of the clip is still being
- * encoded.
- */
-async function* followTranscode(path: string, isDone: () => boolean): AsyncGenerator<Buffer> {
-  let offset = 0
-  for (;;) {
-    let size = 0
-    try {
-      size = (await fs.stat(path)).size
-    } catch {
-      // Not written yet, or taken away again by a failed encode.
-    }
-
-    if (size > offset) {
-      for await (const chunk of createReadStream(path, { start: offset, end: size - 1 })) {
-        yield chunk as Buffer
-      }
-      offset = size
-      continue
-    }
-
-    if (isDone()) return
-    await new Promise((resolve) => setTimeout(resolve, TRANSCODE_POLL_MS))
-  }
-}
-
-/** What identifies a clip's encode: what it was made from, down to its contents. */
-function transcodeKey(target: string, stats: Stats): string {
-  return `${target}\u0000${stats.mtimeMs}:${stats.size}`
-}
-
-/**
- * Serve a clip Chromium cannot play itself. Once its encode is complete the
- * whole file is there and goes out as an ordinary seekable stream; until then
- * the encode is streamed as it is written, so playing starts with the first
- * fragments rather than after the last.
- */
-async function serveTranscode(
-  target: string,
-  key: string,
-  rangeHeader: string | null,
-  method: string
-): Promise<Response> {
-  const complete = transcodes.get(key)
-  if (complete !== undefined) {
-    try {
-      await fs.access(complete.path)
-      return serveFile(complete.path, 'video/mp4', complete.bytes, rangeHeader, method)
-    } catch {
-      transcodes.delete(key)
-    }
-  }
-
-  const job = await transcodeFor(target, key)
-
-  let done = false
-  void job.done.then(() => {
-    done = true
+  child.once('close', () => {
+    clearInterval(reaper)
+    children.delete(child)
   })
 
   const head = { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store' }
-  if (method === 'HEAD') return new Response(null, { status: 200, headers: head })
+  if (method === 'HEAD' || child.stdout === null) {
+    child.kill('SIGKILL')
+    return new Response(null, { status: 200, headers: head })
+  }
 
-  // No length and no ranges: what is on its way is not a file yet, and a player
-  // that is handed a growing stream plays it as one.
-  const body = Readable.from(followTranscode(job.path, () => done))
-  return new Response(Readable.toWeb(body) as ReadableStream, { status: 200, headers: head })
+  // No length and no ranges: what is on its way is not a file, and a player
+  // handed a growing stream plays it as one. The element going away closes this,
+  // which is what stops the encode.
+  return new Response(Readable.toWeb(child.stdout) as ReadableStream, {
+    status: 200,
+    headers: head
+  })
 }
 
 /**
- * Stop every transcode still running and throw this run's clips away. Called as
- * the app quits, so a preview in flight cannot outlive the window that asked
- * for it. The removal is synchronous on purpose: this runs on the way out, and
- * a directory left to delete itself in the background outlives the process that
- * was going to wait for it.
+ * Stop every encode still running. Called as the app quits, so an encode cannot
+ * outlive the window that was watching it.
  */
 export function killAllTranscodes(): void {
   for (const child of children) child.kill('SIGKILL')
   children.clear()
-  transcodes.clear()
-  running.clear()
   durations.clear()
-  if (transcodeDir !== null) {
-    try {
-      rmSync(transcodeDir, { recursive: true, force: true })
-    } catch {
-      // A directory that will not go is swept by the next run anyway.
-    }
-    transcodeDir = null
-  }
 }
 
 /** How long a preview of each file is, by the identity of the file. */
@@ -443,10 +295,9 @@ const durations = new Map<string, number | null>()
 
 /**
  * How long the clip a preview will play is: the file's own length, or as much of
- * it as the encode covers (the bar steps through what is played, not what is on
- * disk), read by ffprobe rather than off the element — a clip that is still being
- * encoded arrives as a live stream, and a stream has no length to report until
- * it is over. Null when nothing can say.
+ * read by ffprobe rather than off the element: a clip main has to encode arrives
+ * as a live stream, and a stream has no length to report until it is over. Null
+ * when nothing can say.
  */
 async function videoDuration(target: string): Promise<number | null> {
   let stats: Stats
@@ -457,7 +308,7 @@ async function videoDuration(target: string): Promise<number | null> {
     return null
   }
 
-  const key = transcodeKey(target, stats)
+  const key = `${target}\u0000${stats.mtimeMs}:${stats.size}`
   const known = durations.get(key)
   if (known !== undefined) return known
 
@@ -487,10 +338,7 @@ async function videoDuration(target: string): Promise<number | null> {
   children.delete(child)
 
   const seconds = Number.parseFloat(printed.trim())
-  const length =
-    code === 0 && Number.isFinite(seconds) && seconds > 0
-      ? Math.min(seconds, TRANSCODE_SECONDS)
-      : null
+  const length = code === 0 && Number.isFinite(seconds) && seconds > 0 ? seconds : null
 
   durations.set(key, length)
   return length
@@ -499,7 +347,7 @@ async function videoDuration(target: string): Promise<number | null> {
 /**
  * Answer whether this build can transcode, which is what decides whether a
  * container Chromium has nothing for is previewable at all — and, since only
- * such a clip needs its length read for it, what it can say about durations.
+ * such a clip needs its length asked of it, what it can say about durations.
  */
 export function registerMediaHandlers(): void {
   ipcMain.handle('fs:can-transcode', () => ffmpegAvailable())
@@ -544,6 +392,13 @@ export function registerMediaProtocol(): void {
     if (!(await ffmpegAvailable())) {
       return new Response('No transcoder available', { status: 501 })
     }
-    return serveTranscode(target, transcodeKey(target, stats), rangeHeader, request.method)
+
+    // A position past the end would be a stream with nothing in it, so the
+    // length is asked of the file — once per file, and only when a request
+    // arrives with a position in it at all.
+    const wanted = startOffsetFromUrl(new URL(request.url))
+    const length = wanted > 0 ? await videoDuration(target) : null
+    const from = length !== null ? Math.min(wanted, Math.max(0, length - 0.25)) : wanted
+    return serveTranscode(target, from, request.method)
   })
 }

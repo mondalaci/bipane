@@ -34,12 +34,13 @@ src/main/imageSize.ts    header-only image dimensions (PNG/JPEG+EXIF/GIF/BMP/
                          ICO/WebP/SVG); no decode, so it answers in well under
                          a millisecond even for a file the preview has to
                          downscale
-src/main/media.ts        the bipane-media scheme a footer plays a video through:
-                         a ranged byte stream, so the element fetches the
-                         metadata and the frames it needs rather than a
-                         hundred-megabyte file; it also encodes what Chromium
-                         cannot play at all, and answers whether that is
-                         possible here (fs:can-transcode)
+src/main/media.ts        the bipane-media scheme a pane plays a video through: a
+                         ranged byte stream, so the element fetches the metadata
+                         and the frames it needs rather than a hundred-megabyte
+                         file; and, for what Chromium cannot play at all, a live
+                         encode of the clip from a wanted position, which is also
+                         what a seek on one is (fs:can-transcode says whether
+                         that is possible here)
 src/main/ipc/watch.ts    IPC: fs:watch, fs:unwatch; pushes fs:changed when a
                          watched directory's contents change (fs.watch = inotify)
 src/main/ipc/pty.ts      IPC: pty:create/write/resize/kill/state, pushes pty:data, pty:exit
@@ -253,11 +254,10 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   as the box is up without a frame in it — which for a clip main has to encode
   before any of it can play is the whole of that wait. Beside the thumbnail the
   footer shows where the clip is: its position, a bar for how far through it that
-  is, and its length, drawn against what the element reports for itself once the
-  clip is a whole file, and against `fs:video-duration` until then — a clip still
-  being encoded is a live stream, which has no length to report, so ffprobe is
-  asked for the file's own (capped at what an encode covers, since that is what
-  the bar steps through). The bar is absent while there is neither a length to
+  is, and its length: what the element reports for a clip Chromium plays itself,
+  and `fs:video-duration` for one main has to encode — that clip is a live
+  stream, which reports only what is left of the clip rather than the clip, so
+  ffprobe is asked for the file's own. The bar is absent while there is neither a length to
   show nor a position yet. The scheme is declared before the
   app is ready, `media-src` carries it in the CSP, and only previewable
   extensions are served, so it cannot become a reader for anything the bar would
@@ -280,7 +280,10 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   browsers. The listing the pane was showing stays in place and is blurred
   behind the display — a `filter` on that content (`paneContent`), animated in
   over the reveal and back out as it is dismissed, so the pane needs no
-  background of its own and the media sits on the folder it came from. That blur
+  background of its own and the media sits on the folder it came from. That
+  content is also clipped to its own box (`clip-path: inset(0)`): a filter's
+  output is not held inside the element it is applied to, so the blur would
+  otherwise spill over the border into the pane next door. That blur
   belongs to the *mode*, not to whatever is being shown: on a row there is
   nothing to display for, the display empties but the pane stays blurred and
   covered — saying so, and how to leave (`Preview mode` / `Esc to exit`) — and
@@ -292,10 +295,16 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   it would move the keyboard, and with it which cursor is being displayed, to the
   other pane — and so is `Ctrl+U`, which swaps the panes themselves; switching
   tabs or closing one leaves the mode too, since the panes it belonged to are
-  gone. The reveal is one animation of one element: the media is laid out where
-  it will sit, then transformed back onto the footer thumbnail it grew out of
-  (`translate` and `scale` together, measured off that box through the source
-  pane's `previewRect()`), and released. It plays once per *entry* into the mode,
+  gone. A display's media fills the pane however small the file is
+  (`h-full w-full object-contain`), upscaled as far as its own aspect allows, so
+  a 320x240 camcorder clip is not a postage stamp in the middle of it. The reveal
+  is one animation of one element: the media is laid out where it will sit, then
+  transformed back onto the footer thumbnail it grew out of (`translate` and
+  `scale` together), and released. It is the media's *own* rectangle that is
+  moved, not the element's — the element is the whole pane with the media
+  letterboxed inside it, so `drawnRect` works out where the picture actually is
+  from the element's box and the media's intrinsic size, and `handoffTransform`
+  lays that onto the thumbnail (`previewRect()` on the source pane). It plays once per *entry* into the mode,
   guarded by `stage.animation`, so arrowing through a folder swaps the display in
   place rather than re-animating on every row — and a row whose thumbnail is not
   up yet has nothing to grow from, so it simply appears. The gesture is for
@@ -347,27 +356,25 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   an old camcorder AVI or the WMV3/VC-1 of an ASF one — `canPlayType` answers no
   for every one of them — so `src/shared/video.ts` keeps a second extension list
   of what only ffmpeg can make playable, and main encodes those into H.264 for
-  the same `bipane-media` stream (muted, at most five minutes, at most 720px).
+  the same `bipane-media` stream (at most 720px wide, with its sound: a footer
+  thumbnail is muted by the element that plays it, but a display is heard).
   The encode is streamed out **as it is produced** (`empty_moov` +
-  `frag_keyframe`, a keyframe every thirty frames): a plain mp4 has no header
-  until its encode has ended, so waiting for one would mean a black box for the
-  length of the whole clip, and following the file as it grows is what puts the
-  first frame on screen a third of a second in instead. That first play is a live
-  stream, so it has no usable `seekable` range and the arrow keys do nothing on
-  it; the clip becomes seekable the next time it is shown, once its encode is
-  complete and cached. However many elements ask for a clip — a footer playing it
-  and a display showing it — they share one encode.
-  The five minutes are why the arrow keys are meaningful on such a file: the clip
-  is what they step through, and a twenty-second encode of a three-minute
-  camcorder AVI left every step landing on its end — while a feature-length file
-  is still neither worth encoding to fill a 64px box nor worth keeping in the
-  temp directory. Each result is cached in a per-run directory under the temp
-  path, which is what makes stepping back onto a row free and lets a display loop
-  a clip without encoding it again (the cache holds a bounded number of encodes
-  and a bounded number of bytes, since a long clip's encode is not small) — and
-  that directory is removed as synchronous work on the way out, because a delete
-  left to run in the background outlives the process that was going to wait for
-  it. All of this is gated on ffmpeg existing: the renderer asks once
+  `frag_keyframe`, a keyframe every thirty frames, straight to the response with
+  nothing written to disk): a plain mp4 has no header until its encode has ended,
+  so waiting for one would mean a black box for the length of the whole clip, and
+  a fragment is on screen a tenth of a second in instead. There is no length
+  limit and no finished file to wait for — a display is a *player*, so a
+  feature-length file is watched rather than prepared, and the encode runs for as
+  long as the clip is looked at (the element going away is what stops it).
+  `from` is the whole of seeking, and is why the keys work on such a clip at all:
+  a live stream reports no range to move within, so moving about the clip means
+  asking for the stream again — `-ss` before the input — from the position
+  wanted. The element rebases whatever it is given to zero, so the pane that
+  asked adds that offset back to say where the clip is, and takes the length from
+  the file itself (`fs:video-duration`) rather than from a stream that only knows
+  what is left of it. However many elements ask for a clip — a footer playing it
+  and a display showing it — each has its own stream, and a seek on either is a
+  position in the clip. All of this is gated on ffmpeg existing: the renderer asks once
   (`fs:can-transcode`) and, with no answer, those files are not media at all —
   `Enter` opens them in the system player, exactly as before that list existed.
   `BIPANE_FFMPEG` names the binary for a machine that keeps it off the PATH.

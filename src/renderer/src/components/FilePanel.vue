@@ -120,13 +120,26 @@ const previewWaiting = computed(() => footerTall.value && !previewVisible.value)
  * fetches only the metadata and the frames it needs rather than a preview's
  * worth of a file that can be a hundred megabytes long.
  */
-function mediaUrlFor(path: string): string {
-  return `${MEDIA_SCHEME}://file/?path=${encodeURIComponent(path)}`
+function mediaUrlFor(path: string, from = 0): string {
+  const base = `${MEDIA_SCHEME}://file/?path=${encodeURIComponent(path)}`
+  return from > 0 ? `${base}&from=${from}` : base
 }
+
+/**
+ * Where each element is streaming its clip from. A clip main has to encode is a
+ * live stream, which reports no range to move within, so moving about it means
+ * asking for the stream again at the position wanted: this is what that position
+ * is, and changing it is what a seek does. It stays put once set — the element
+ * would reload all over again otherwise — and means nothing for a clip Chromium
+ * plays itself, which is seeked where it stands.
+ */
+const footerFrom = ref(0)
+const stageFrom = ref(0)
 
 const videoUrl = computed(() => {
   const target = previewTarget.value
-  return target && target.kind === 'video' ? mediaUrlFor(target.path) : null
+  if (!target || target.kind !== 'video') return null
+  return mediaUrlFor(target.path, needsTranscode(target.name) ? footerFrom.value : 0)
 })
 
 const showImage = computed(() => previewTarget.value?.kind === 'image' && frame.value !== null)
@@ -224,6 +237,7 @@ watch(
     videoLength.value = null
     clipLength.value = null
     clipLengthKey = null
+    footerFrom.value = 0
 
     const target = previewTarget.value
     if (key === null || !target) {
@@ -265,7 +279,43 @@ function onVideoMetadata(event: Event): void {
   }
   if (previewState.value === 'probing') previewState.value = 'loading'
 
-  resumeFromDisplay(video)
+  pickUpAt(video, previewKeyFor(previewTarget.value), null)
+}
+
+/**
+ * The rectangle a display's media is actually drawn in. The element fills the
+ * pane and letterboxes the media inside it (`object-contain`), so a gesture has
+ * to be measured from the media's own rectangle rather than from the element's —
+ * otherwise it starts and lands a letterbox away from the thumbnail it belongs
+ * to. Null while the media's own size is not known.
+ */
+function drawnRect(element: HTMLImageElement | HTMLVideoElement): DOMRect | null {
+  const box = element.getBoundingClientRect()
+  const width = element instanceof HTMLVideoElement ? element.videoWidth : element.naturalWidth
+  const height = element instanceof HTMLVideoElement ? element.videoHeight : element.naturalHeight
+  if (width <= 0 || height <= 0 || box.width <= 0 || box.height <= 0) return null
+
+  const scale = Math.min(box.width / width, box.height / height)
+  const drawnWidth = width * scale
+  const drawnHeight = height * scale
+  return new DOMRect(
+    box.left + (box.width - drawnWidth) / 2,
+    box.top + (box.height - drawnHeight) / 2,
+    drawnWidth,
+    drawnHeight
+  )
+}
+
+/**
+ * The transform that lays a media's own rectangle onto `target`, for an element
+ * transformed about its own top-left corner — which is what a reveal and a
+ * shrink are: the media, where it is drawn, moving onto (or off) the thumbnail.
+ */
+function handoffTransform(target: DOMRect, drawn: DOMRect, box: DOMRect): string {
+  const scale = target.width / drawn.width
+  const x = target.left - box.left - scale * (drawn.left - box.left)
+  const y = target.top - box.top - scale * (drawn.top - box.top)
+  return `translate(${x}px, ${y}px) scale(${scale})`
 }
 
 /**
@@ -273,13 +323,21 @@ function onVideoMetadata(event: Event): void {
  * moved — the clip was already part way through there, so playing it from the
  * beginning again reads as a restart rather than as a hand-back.
  */
-function resumeFromDisplay(element: HTMLVideoElement): void {
-  const held = handedBack.value
-  if (held === null || held.key !== previewKeyFor(previewTarget.value)) return
+function pickUpAt(element: HTMLVideoElement, key: string | null, fallback: number | null): void {
+  const pending = pickUpFrom.value
+  const held = pending !== null && pending.key === key ? pending : null
+  if (held !== null) pickUpFrom.value = null
 
-  const at = Math.min(held.time, element.duration)
-  if (!Number.isFinite(at) || !canMoveWithin(element, at)) return
-  element.currentTime = at
+  // A stream has already been asked for from that position: there is nothing to
+  // move, and a seek within the rest of the clip would be the wrong place.
+  if (isStream(element)) return
+
+  const at = held !== null ? held.time : fallback
+  if (at === null) return
+
+  const clamped = Math.min(at, element.duration)
+  if (!Number.isFinite(clamped) || !canMoveWithin(element, clamped)) return
+  element.currentTime = clamped
 }
 
 /**
@@ -350,11 +408,11 @@ const paneContent = ref<HTMLElement | null>(null)
 let contentBlur: Animation | null = null
 
 /** The stream URL of the media another pane is displaying. */
-const stageVideoUrl = computed(() =>
-  shownStage.value && shownStage.value.target.kind === 'video'
-    ? mediaUrlFor(shownStage.value.target.path)
-    : null
-)
+const stageVideoUrl = computed(() => {
+  const stage = shownStage.value
+  if (!stage || stage.target.kind !== 'video') return null
+  return mediaUrlFor(stage.target.path, needsTranscode(stage.target.name) ? stageFrom.value : 0)
+})
 
 /** An image being displayed on behalf of another pane, as a `data:` URL. */
 const stageFrame = ref<string | null>(null)
@@ -432,6 +490,9 @@ watch(
       stageDismissal?.cancel()
       stageDismissal = null
       shownStage.value = stage
+      // A clip main has to encode is asked for from where the mode began; a clip
+      // Chromium plays is loaded as it is and moved to that position.
+      stageFrom.value = stage.resumeAt ?? 0
       raiseStageSound()
       void loadStage(stage)
       return
@@ -572,23 +633,13 @@ function onStageShown(): void {
   stageAnimation = stage.animation
 
   const from = stage.from()
-  if (!from) return
-
-  const to = element.getBoundingClientRect()
-  if (to.width <= 0 || to.height <= 0) return
+  const drawn = drawnRect(element)
+  if (!from || !drawn) return
 
   element.animate(
-    [
-      {
-        transform: `translate(${from.left - to.left}px, ${from.top - to.top}px) scale(${
-          from.width / to.width
-        }, ${from.height / to.height})`
-      },
-      { transform: 'none' }
-    ],
+    [{ transform: handoffTransform(from, drawn, element.getBoundingClientRect()) }, { transform: 'none' }],
     { duration: STAGE_REVEAL_MS, easing: 'ease-out' }
   )
-
 }
 
 /**
@@ -618,20 +669,16 @@ async function runDismissal(): Promise<void> {
     return
   }
 
-  const from = element.getBoundingClientRect()
   const to = stage.from()
+  const drawn = drawnRect(element)
 
   let moving: Promise<void> = Promise.resolve()
   let shrink: Animation | null = null
-  if (to !== null && from.width > 0 && from.height > 0) {
+  if (to !== null && drawn !== null) {
     shrink = element.animate(
       [
         { transform: 'none' },
-        {
-          transform: `translate(${to.left - from.left}px, ${to.top - from.top}px) scale(${
-            to.width / from.width
-          }, ${to.height / from.height})`
-        }
+        { transform: handoffTransform(to, drawn, element.getBoundingClientRect()) }
       ],
       { duration: STAGE_REVEAL_MS, easing: 'ease-in', fill: 'forwards' }
     )
@@ -665,11 +712,9 @@ async function runDismissal(): Promise<void> {
 function resumeStage(event: Event): void {
   const element = event.target
   const stage = shownStage.value
-  if (!(element instanceof HTMLVideoElement) || !stage || stage.resumeAt === null) return
+  if (!(element instanceof HTMLVideoElement) || !stage) return
 
-  const at = Math.min(stage.resumeAt, element.duration)
-  if (!Number.isFinite(at) || !canMoveWithin(element, at)) return
-  element.currentTime = at
+  pickUpAt(element, previewKeyFor(stage.target), stage.resumeAt)
 }
 
 function onStageError(): void {
@@ -684,6 +729,17 @@ const previewEl = ref<HTMLElement | null>(null)
 
 /** The footer's own clip, while one is playing there. */
 const previewVideo = ref<HTMLVideoElement | null>(null)
+
+/**
+ * Whether an element is reading a clip main has to encode, which is a stream
+ * rather than a file: it is moved about by asking for it from another position,
+ * and its own clock counts from the start of whatever it was given rather than
+ * from the start of the clip.
+ */
+function isStream(element: HTMLVideoElement): boolean {
+  const target = element === stageMedia.value ? shownStage.value?.target : previewTarget.value
+  return target !== null && target !== undefined && needsTranscode(target.name)
+}
 
 /** Where the footer's clip has got to, and how long it is once that is knowable. */
 const videoTime = ref(0)
@@ -734,14 +790,19 @@ function readVideoClock(): void {
   if (!(element instanceof HTMLVideoElement)) return
 
   const clock = clockOf(element)
-  videoTime.value = clock.time
-  videoLength.value = clock.length
+  const stream = isStream(element)
+  // A stream counts from the start of whatever it was given, so the clip's
+  // position is the offset it was started at plus this element's own clock — and
+  // its length is what is left of the clip rather than the clip, which is what
+  // the file itself is asked for instead.
+  videoTime.value = (stream ? footerFrom.value : 0) + clock.time
+  videoLength.value = stream ? null : clock.length
 
-  // A position held for a clip coming back from a display has done its job now
-  // that this element has been read — and not before: until it can be read the
-  // element is a fresh one at 0:00, so dropping the held position a moment
-  // earlier would flash the bar back to a stale value on the way.
-  handedBack.value = null
+  // A held position has done its job now that this element has been read — and
+  // not before: until it can be read the element is a fresh one at 0:00, so
+  // dropping the position a moment earlier would flash the bar back to a stale
+  // value on the way.
+  pickUpFrom.value = null
 
   // A clip still being encoded is a live stream, which has no length of its own
   // to report: ask the file, once, for the row the cursor has settled on.
@@ -755,7 +816,16 @@ function readVideoClock(): void {
  */
 function readStageClock(): void {
   const element = stageMedia.value
-  emit('stage-clock', element instanceof HTMLVideoElement ? clockOf(element) : null)
+  if (!(element instanceof HTMLVideoElement)) {
+    emit('stage-clock', null)
+    return
+  }
+  const clock = clockOf(element)
+  const stream = isStream(element)
+  emit('stage-clock', {
+    time: (stream ? stageFrom.value : 0) + clock.time,
+    length: stream ? null : clock.length
+  })
 }
 
 /**
@@ -767,13 +837,15 @@ function readStageClock(): void {
 const playTime = computed(() => {
   if (props.transferred) return props.displayedClock?.time ?? videoTime.value
 
-  const held = handedBack.value
+  const held = pickUpFrom.value
   if (held !== null && held.key === previewKeyFor(previewTarget.value)) return held.time
   return videoTime.value
 })
 
 const playLength = computed(() => {
-  const own = videoLength.value ?? clipLength.value
+  // The file's own length, where it has been asked for, over the element's: a
+  // stream's length is only what is left of the clip, not the clip.
+  const own = clipLength.value ?? videoLength.value
   if (!props.transferred) return own
   return props.displayedClock?.length ?? own
 })
@@ -800,20 +872,36 @@ const showPlayBar = computed(
 )
 
 /**
- * Where a clip had got to when a display handed it back — held with the clip it
- * belongs to, so it can never be applied to a different one. The footer's own
- * element is created fresh when the clip comes back, and would otherwise start
- * it over from the beginning; until it has been moved, this is also what the bar
- * shows, so that the strip does not flicker down to 0:00 on the way.
+ * A position an element has to pick up at, held with the clip it belongs to so
+ * that it can never be applied to a different one. Two things put one there: a
+ * display handing the clip back, and a seek that had to replace the element —
+ * because the file behind it was still being encoded, and only became something
+ * the keys can move about once the encode was done. Until the fresh element has
+ * been moved, this is also what the bar shows, so the strip does not flicker
+ * down to 0:00 on the way.
  */
-const handedBack = ref<{ key: string; time: number } | null>(null)
+const pickUpFrom = ref<{ key: string; time: number } | null>(null)
 
 watch(
   () => props.displayedClock,
   (clock) => {
     const key = previewKeyFor(previewTarget.value)
     if (props.transferred !== true || !clock || key === null) return
-    handedBack.value = { key, time: clock.time }
+    pickUpFrom.value = { key, time: clock.time }
+  }
+)
+
+// A clip coming back to this pane's own element, which has to be read from where
+// the display left it: by then the element is a fresh one, and asking the stream
+// for that position is the only way a clip main has to encode can start there.
+watch(
+  () => props.transferred === true,
+  (transferred) => {
+    if (transferred) return
+    const held = pickUpFrom.value
+    const target = previewTarget.value
+    if (held === null || target === null || held.key !== previewKeyFor(target)) return
+    footerFrom.value = held.time
   }
 )
 
@@ -849,11 +937,16 @@ function previewPosition(): { key: string; time: number } | null {
   const key = previewKeyFor(previewTarget.value)
   if (!(element instanceof HTMLVideoElement) || key === null) return null
 
+  // Where the clip is, not where this element is: a stream counts from the start
+  // of whatever it was given, so a clip that has been moved about is further
+  // along than the element's own clock says.
+  const at = (isStream(element) ? footerFrom.value : 0) + element.currentTime
+
   // A preview that has played itself out has nothing to hand over: the display
   // is where the clip is watched, so it starts it again rather than sitting on
   // the last frame the thumbnail stopped at.
-  if (element.ended || element.currentTime <= 0) return null
-  return { key, time: element.currentTime }
+  if (element.ended || at <= 0) return null
+  return { key, time: at }
 }
 
 /**
@@ -876,9 +969,25 @@ function seek(element: HTMLVideoElement | HTMLImageElement | null, delta: number
   const wasEnded = element.ended
   const at = Math.min(Math.max(element.currentTime + delta, 0), duration)
 
-  // The clip has to have somewhere to move *to*, so the keys do nothing on a
-  // clip that cannot be moved within rather than throwing it back to the start.
-  if (!canMoveWithin(element, at)) return
+  // A clip main has to encode is a live stream, which reports no range to move
+  // within — so there is nothing for this element to seek to. Moving about such
+  // a clip means asking for its stream again from the position wanted, which is
+  // what the offset in that element's URL is for: it reloads there and plays on.
+  // It is never moved by seeking the element itself, even where the stream has
+  // grown a range: that range is the rest of the clip, and its clock is rebased.
+  if (!canMoveWithin(element, at) || isStream(element)) {
+    const onStage = element === stageMedia.value
+    const wanted = Math.max(0, (onStage ? stageFrom.value : footerFrom.value) + element.currentTime + delta)
+    if (onStage) {
+      stageFrom.value = wanted
+    } else {
+      footerFrom.value = wanted
+      // The bar keeps showing where the clip is being taken while it reloads.
+      const key = previewKeyFor(previewTarget.value)
+      if (key !== null) pickUpFrom.value = { key, time: wanted }
+    }
+    return
+  }
 
   element.currentTime = at
   if (wasEnded && at < duration) void element.play().catch(() => {})
@@ -1111,7 +1220,10 @@ function onRenameBlur(): void {
     @mousedown="onPointerDown"
     @contextmenu.prevent
   >
-    <div ref="paneContent" class="flex min-h-0 grow flex-col">
+    <!-- The pane's own content, which a display blurs as a whole. Clipped to
+         its own box: a filter's output is not held inside the element it is on,
+         so the blur would spill over the border into the pane next door. -->
+    <div ref="paneContent" class="flex min-h-0 grow flex-col [clip-path:inset(0)]">
       <div
         class="flex h-7 shrink-0 items-center gap-2 border-b border-border-subtle px-3"
         :class="active ? 'bg-accent text-fg-bright' : 'bg-surface text-fg-dim'"
@@ -1351,7 +1463,7 @@ function onRenameBlur(): void {
           :src="stageFrame ?? undefined"
           alt=""
           draggable="false"
-          class="max-h-full max-w-full origin-top-left object-contain"
+          class="h-full w-full origin-top-left object-contain"
           :class="stageState === 'ready' ? '' : 'invisible'"
           @load="onStageShown"
           @error="onStageError"
@@ -1367,7 +1479,7 @@ function onRenameBlur(): void {
           muted
           autoplay
           loop
-          class="max-h-full max-w-full origin-top-left object-contain"
+          class="h-full w-full origin-top-left object-contain"
           :class="stageState === 'ready' ? '' : 'invisible'"
           @loadedmetadata="resumeStage"
           @loadeddata="onStageShown"
