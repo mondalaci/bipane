@@ -410,7 +410,14 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   sizes the host's content box to exactly that, and shifts the terminal up so the
   cursor's row lands inside it. Leaving the terminal at the top instead showed
   the row *above* the cursor — after `ls`, the last output line rather than the
-  prompt sitting under it.
+  prompt sitting under it. The clip must be the row exactly, so the host carries
+  no vertical padding: `overflow: hidden` clips at the **padding box**, and with
+  the `py-1` the strip used to have, the translated row above the cursor painted
+  its descender tips into the top padding — a stray pixel of the previous line
+  under the strip's border, visible only when that line had a `p`/`y`/`g`/`q` or
+  an underscore low enough to reach it. The gutter above and below is the host's
+  margin (`my-1`), which lies outside the clip edge, so the height written there
+  is one row on its own.
 - **The shell outlives its view; the terminal view does not own it.**
   `TerminalPane` must not kill it on unmount — main reaps sessions when the
   window goes away, and a workspace kills its own session only through

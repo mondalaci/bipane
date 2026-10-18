@@ -37,18 +37,11 @@ let pendingFrame = 0
 // One xterm row, in CSS pixels. It is a fraction (12px * 1.25 line height is
 // not a whole pixel), so it has to be measured rather than assumed.
 let stripRowHeight = 0
-// The host's vertical padding: box-sizing is border-box, so the content box is
-// only exactly one row tall once this is added back to the height.
-let stripPadding = 0
 
 function measureStripRow(): void {
   const row = term?.element?.querySelector<HTMLElement>('.xterm-rows > div')
   const measured = row?.getBoundingClientRect().height ?? 0
   if (measured > 0) stripRowHeight = measured
-  if (host.value) {
-    const style = getComputedStyle(host.value)
-    stripPadding = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom)
-  }
 }
 
 // The last styles written by applyStripViewport. It runs on every cursor move
@@ -65,6 +58,13 @@ let stripTransform = ''
  * and the terminal is shifted up so the cursor's row lands inside it — with the
  * terminal left alone the strip showed the row above the cursor (the last output
  * line after `ls`) instead of the prompt.
+ *
+ * `overflow: hidden` clips at the padding box, not the content box, so the host
+ * must carry no vertical padding: with it, the translated terminal's row above
+ * the cursor painted its descender tips into the top of the strip, a stray pixel
+ * of the previous line. The gutter above and below is the host's margin instead,
+ * which lies outside the clip edge, and the height written here is exactly one
+ * row.
  */
 function applyStripViewport(): void {
   const hostEl = host.value
@@ -81,7 +81,7 @@ function applyStripViewport(): void {
   if (stripRowHeight === 0) return
 
   const cursorRow = term?.buffer.active.cursorY ?? 0
-  const nextHeight = `${stripRowHeight + stripPadding}px`
+  const nextHeight = `${stripRowHeight}px`
   const nextTransform = cursorRow > 0 ? `translateY(${-cursorRow * stripRowHeight}px)` : ''
   if (nextHeight !== stripHeight) hostEl.style.height = stripHeight = nextHeight
   if (nextTransform !== stripTransform) xtermEl.style.transform = stripTransform = nextTransform
@@ -275,7 +275,7 @@ defineExpose({ focusTerminal })
 
     <div
       ref="host"
-      class="min-h-0 overflow-hidden px-3 py-1"
+      class="min-h-0 overflow-hidden px-3 my-1"
       :class="expanded ? 'flex-1' : 'flex-none'"
     ></div>
   </section>
