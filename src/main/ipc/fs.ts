@@ -502,27 +502,71 @@ export function registerFsHandlers(): void {
       // the process working directory — typing `sub` must mean `<pane>/sub`.
       const base =
         typeof baseDir === 'string' && baseDir.length > 0 ? path.resolve(baseDir) : process.cwd()
-      const destDir = path.isAbsolute(destination)
+      const dest = path.isAbsolute(destination)
         ? path.resolve(destination)
         : path.resolve(base, destination)
 
-      // The field may name a folder that does not exist yet (typically a
-      // relative name under the source pane). Create it, so typing `sub` copies
-      // into a `sub` folder rather than failing on a missing parent.
+      const valid = sources.filter(
+        (source): source is string => typeof source === 'string' && source.length > 0
+      )
+
+      // A trailing separator means "a directory", the way a shell reads it, and
+      // is how one asks for a fresh folder when a single entry could also be a
+      // rename.
+      const forceDirectory = /[/\\]$/.test(destination)
+
+      let destStats: Stats | null = null
       try {
-        await fs.mkdir(destDir, { recursive: true })
-      } catch (error) {
-        return { ok: false, error: toFsError(error) }
+        destStats = await fs.lstat(dest)
+      } catch {
+        destStats = null
       }
 
+      // The destination is a directory to copy *into* when it already is one, or
+      // when a path that does not exist yet can only be a folder because several
+      // entries share it (a trailing separator asks for the same). Otherwise —
+      // a single entry naming a path that is not a directory — it is the copy's
+      // new name: `a.txt` -> `b.txt` copies to `b.txt`, rather than making a
+      // `b.txt` folder and copying `a.txt` inside it. This mirrors `fs:move`.
+      const intoDirectory =
+        (destStats?.isDirectory() ?? false) ||
+        (!destStats && (forceDirectory || valid.length > 1))
+
+      if (intoDirectory && destStats && !destStats.isDirectory()) {
+        return {
+          ok: false,
+          error: { code: 'ENOTDIR', message: `"${path.basename(dest)}" is not a directory` }
+        }
+      }
+
+      if (!intoDirectory && valid.length > 1) {
+        return {
+          ok: false,
+          error: {
+            code: 'ENOTDIR',
+            message: 'Copying several entries needs an existing destination directory'
+          }
+        }
+      }
+
+      // A folder destination the dialog named but that does not exist yet is
+      // created, so typing a fresh folder name works instead of failing on a
+      // missing parent.
+      if (intoDirectory && !destStats) {
+        try {
+          await fs.mkdir(dest, { recursive: true })
+        } catch (error) {
+          return { ok: false, error: toFsError(error) }
+        }
+      }
+
+      const destDir = intoDirectory ? dest : path.dirname(dest)
       const copied: string[] = []
       const failed: CopyFailure[] = []
 
-      for (const source of sources) {
-        if (typeof source !== 'string' || source.length === 0) continue
-
+      for (const source of valid) {
         const from = path.resolve(source)
-        const to = path.join(destDir, path.basename(from))
+        const to = intoDirectory ? path.join(dest, path.basename(from)) : dest
 
         try {
           // Never silently clobber: a name that already exists in the
@@ -534,7 +578,9 @@ export function registerFsHandlers(): void {
               path: from,
               error: {
                 code: 'EEXIST',
-                message: `"${path.basename(to)}" already exists in "${destDir}"`
+                message: intoDirectory
+                  ? `"${path.basename(to)}" already exists in "${destDir}"`
+                  : `"${path.basename(to)}" already exists`
               }
             })
             continue

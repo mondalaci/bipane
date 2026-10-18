@@ -117,9 +117,10 @@ both of them travelling to the other column, and nothing in a pane stops for it:
 a display among them goes on playing as it changes column, and the columns keep
 the sizes they had, so the divider does not move,
 `Alt+S` starts an incremental search, `F5` copies the marked entries (or the
-cursor row) into the other pane, `F6` moves them there (its destination field
-names a directory to move into, but for a single entry a path that is not a
-directory is the entry's new name — so `blah` -> `blah2` renames, and a
+cursor row) into the other pane, `F6` moves them there (both take a destination
+field naming a directory to act into, but for a single entry a path that is not
+a directory is the entry's new name — so `blah` -> `blah2` renames or copies to
+`blah2`, rather than making a `blah2` folder and putting `blah` inside it, and a
 trailing separator, `blah2/`, asks for a folder instead), `Shift+F6` renames the
 cursor row in place, and `F8` deletes them after confirmation.
 `Backspace` never navigates: it belongs to the shell's line
