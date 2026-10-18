@@ -546,6 +546,12 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
 
 ## Verifying changes in dev
 
+**Do not visually or interactively test changes unless explicitly asked.** The
+manual is here for when the user asks for it; by default they do the visual and
+interaction testing themselves, and driving the app (xdotool, screenshots, CDP)
+is slow and disruptive. So treat the steps below as on-request only — do not
+launch, restart, or drive the dev app to check your own work unless told to.
+
 Nothing here is exotic, but each item below produced a confidently wrong
 conclusion at least once, so treat them as required steps.
 
