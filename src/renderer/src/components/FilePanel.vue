@@ -56,6 +56,7 @@ const emit = defineEmits<{
 }>()
 
 const listEl = ref<HTMLUListElement | null>(null)
+const footerEl = ref<HTMLElement | null>(null)
 const searchInput = ref<HTMLInputElement | null>(null)
 
 // The footer mirrors the status of this pane's own cursor and marks.
@@ -172,9 +173,38 @@ const PREVIEW_HEIGHT = 64
 const PREVIEW_MAX_WIDTH = 160
 
 /**
- * How long the footer takes to change size — both the classes below and the
- * scroll that follows it read this, since the listing is short of the row's
- * space for exactly that long.
+ * The strip's two sizes: the plain status bar, and the one holding a preview
+ * box — the box's own height plus the gutter it keeps above and below it.
+ */
+const FOOTER_HEIGHT = 24
+const FOOTER_PREVIEW_HEIGHT = PREVIEW_HEIGHT + 8
+
+/** The room the strip takes from the listing when it is at its tall size. */
+const FOOTER_GROWTH = FOOTER_PREVIEW_HEIGHT - FOOTER_HEIGHT
+
+/**
+ * The empty band the listing keeps at its end, so that a scroll a media row
+ * pushed past the end stays a legal scroll position. The strip's height is the
+ * listing's own height, so as the strip gives its room back the view's bottom
+ * edge moves — and the browser keeps the view where it is rather than show blank
+ * below the content, which drags the rows down with it. The band is only as wide
+ * as the scroll past the end actually is, so a listing that is not sitting at its
+ * end has none, and the row a cursor move lands on is never placed past it (see
+ * `measureListSlack`).
+ */
+const listSlack = ref(0)
+const listSlackStyle = computed(() =>
+  listSlack.value === 0 ? undefined : { paddingBottom: `${listSlack.value}px` }
+)
+
+/**
+ * How long the footer takes to grow. Only a growing strip is animated: a strip
+ * *shrinking* sweeps over the very rows it is uncovering, so a cursor landing
+ * there would be behind it for as long as the strip takes to get out of the way
+ * — and bringing the row clear of it instead would leave the listing scrolled up
+ * past where the cursor's own move puts it, a scroll nothing would take back.
+ * Growing sweeps the same way, but the room it takes is room the cursor row
+ * needs anyway, so there the reveal is the answer (see `onListResize`).
  */
 const FOOTER_RESIZE_MS = 150
 
@@ -1579,10 +1609,50 @@ let listObserver: ResizeObserver | null = null
 function measurePageRows(): void {
   const element = listEl.value
   if (!element) return
-  const styles = getComputedStyle(element)
-  const padding = parseFloat(styles.paddingTop) + parseFloat(styles.paddingBottom)
+  // Only top padding is room the rows have lost: the bottom padding is the band
+  // the listing scrolls into (see `listSlackStyle`), with the rows above it.
+  const padding = parseFloat(getComputedStyle(element).paddingTop)
   const usable = element.clientHeight - padding
   props.controller.state.pageRows = Math.max(1, Math.floor(usable / ROW_HEIGHT))
+}
+
+/**
+ * Measure the band the listing needs at its end, from the room it has or is
+ * about to have — whichever is more, since a strip on its way out is not yet
+ * giving its room back (measuring the room it *will* have there would drop the
+ * band too early and the view would be dragged down after all). A move is what
+ * measures it, before the room changes, so the band is already in place for the
+ * layout that would otherwise clamp the scroll: a listing that ends above the
+ * view has no band at all, and the band is never wider than the strip's growth.
+ */
+function measureListSlack(): void {
+  const element = listEl.value
+  const footer = footerEl.value
+  const last = element?.lastElementChild
+  if (element === null || footer === null || last === null || last === undefined) {
+    listSlack.value = 0
+    return
+  }
+
+  const settled = footerTall.value ? FOOTER_PREVIEW_HEIGHT : FOOTER_HEIGHT
+  const room = element.clientHeight + Math.max(0, footer.offsetHeight - settled)
+  const contentEnd =
+    element.scrollTop + last.getBoundingClientRect().bottom - element.getBoundingClientRect().top
+  listSlack.value = Math.min(Math.max(element.scrollTop + room - contentEnd, 0), FOOTER_GROWTH)
+}
+
+/**
+ * The listing just changed height, which means the strip is taking room from it
+ * (it is the only thing that changes size here, and it only grows in an
+ * animation — a strip shrinking snaps, so this never sees room coming back).
+ * The strip's growth owns the cursor row's reveal, because nothing else knows
+ * the strip is arriving: the move measured the room the listing had, and this is
+ * the part the strip brings, so the row ends up against the strip's edge rather
+ * than being stepped into and out again as the strip goes by.
+ */
+function onListResize(): void {
+  measurePageRows()
+  scrollRowIntoView(props.controller.state.cursor, 'nearest')
 }
 
 function scrollRowIntoView(index: number, align: ScrollAlign): void {
@@ -1611,37 +1681,14 @@ function scrollRowIntoView(index: number, align: ScrollAlign): void {
   }
 }
 
-/**
- * Bring the cursor row back into view for as long as the footer is taking the
- * space it needs (or giving it back). The strip's own height is what the
- * listing is measured against, so on a move onto media near the bottom the
- * scroll has to follow it: a single adjustment when the cursor lands would be
- * measured against the size the listing still has, and the row would be covered
- * as the footer grows over it. Following the transition keeps the row at the
- * bottom edge rather than stepping into the strip's way and out again.
- */
-let footerFollowFrame = 0
-
-function followFooterResize(cursor: number, align: ScrollAlign): void {
-  if (footerFollowFrame !== 0) cancelAnimationFrame(footerFollowFrame)
-  const until = performance.now() + FOOTER_RESIZE_MS
-
-  const step = (): void => {
-    scrollRowIntoView(cursor, align)
-    footerFollowFrame = performance.now() < until ? requestAnimationFrame(step) : 0
-  }
-
-  footerFollowFrame = requestAnimationFrame(step)
-}
-
 watch(
   [() => props.controller.state.path, () => props.controller.state.cursor],
   async () => {
     const { cursor, scrollAlign } = props.controller.state
     props.controller.state.scrollAlign = 'nearest'
+    measureListSlack()
     await nextTick()
     scrollRowIntoView(cursor, scrollAlign)
-    followFooterResize(cursor, scrollAlign)
   }
 )
 
@@ -1656,7 +1703,7 @@ watch(
 )
 
 onMounted(() => {
-  listObserver = new ResizeObserver(measurePageRows)
+  listObserver = new ResizeObserver(onListResize)
   if (listEl.value) listObserver.observe(listEl.value)
   measurePageRows()
   window.addEventListener('mouseup', endPainting)
@@ -1665,8 +1712,6 @@ onMounted(() => {
 onBeforeUnmount(() => {
   listObserver?.disconnect()
   listObserver = null
-  if (footerFollowFrame !== 0) cancelAnimationFrame(footerFollowFrame)
-  footerFollowFrame = 0
   stageAreaObserver?.disconnect()
   stageAreaObserver = null
   stageBarObserver?.disconnect()
@@ -1877,7 +1922,7 @@ function onRenameBlur(): void {
         {{ notice.text }}
       </p>
 
-      <ul ref="listEl" class="min-h-0 flex-1 overflow-y-auto">
+      <ul ref="listEl" class="min-h-0 flex-1 overflow-y-auto" :style="listSlackStyle">
         <li
           v-for="(entry, index) in controller.state.entries"
           :key="entry.path"
@@ -1936,9 +1981,12 @@ function onRenameBlur(): void {
       </ul>
 
       <div
+        ref="footerEl"
         class="flex shrink-0 items-center justify-between gap-3 overflow-hidden border-t border-border-subtle bg-surface px-3 text-ui-sm text-fg-dim transition-[height] ease-out"
-        :class="footerTall ? 'h-[4.5rem] py-1' : 'h-6'"
-        :style="{ transitionDuration: `${FOOTER_RESIZE_MS}ms` }"
+        :style="{
+          height: `${footerTall ? FOOTER_PREVIEW_HEIGHT : FOOTER_HEIGHT}px`,
+          transitionDuration: `${footerTall ? FOOTER_RESIZE_MS : 0}ms`
+        }"
       >
         <div class="flex min-w-0 items-center gap-3">
           <!-- Shown/hidden with `v-show`, not `v-if`: a video hidden this way is

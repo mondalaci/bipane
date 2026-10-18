@@ -227,12 +227,31 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   `FilePanel` reserves the space from the moment the cursor lands on media — the
   extension says it is, before anything has been read — so stepping between clips
   never collapses the footer and pushes the list back up. The strip itself moves
-  between its two sizes — the 1.5rem status bar and the 4.5rem one carrying a
-  preview box — in a quick animation of its own height, and the listing's scroll
-  follows that animation frame by frame for as long as it runs, so a cursor
-  landing on media near the bottom is not covered as the strip grows over it.
-  Inside that space the
-  box is held at the shape of the row just left until the new one is known, so it
+  between its two sizes — the 24px status bar and the 72px one carrying a
+  preview box — and only its *growth* is animated, because only that can be:
+  a strip shrinking sweeps down over the very rows it is uncovering, so a cursor
+  landing there would sit behind it for the length of the animation, and keeping
+  the row clear of it instead would leave the listing scrolled up past where the
+  cursor's own move put it — a scroll nothing would ever take back. So the strip
+  snaps smaller, and the move that measures the listing's room
+  (`scrollRowIntoView`) is the one the instant resize decided. Growing sweeps the
+  same way, but the room it takes is room the cursor row needs anyway, so there
+  the reveal is the answer: the listing's own change of size is what keeps the
+  row clear of the strip as it arrives (`onListResize`), which is what makes a
+  move onto media near the bottom land with the row visible however much the
+  strip takes — and it is deliberately one-way, since a listing that has just
+  *gained* room must not be scrolled up for room it is regaining. What the strip
+  may not do either way is move the rows: its height is the listing's height, so
+  as it gives its room back the view's bottom edge moves, and the browser keeps
+  the view where it is rather than show blank below the content, which would drag
+  the rows down with it. The listing therefore carries a band at its end
+  (`listSlack`), measured by the move that is about to change the strip from the
+  room the listing has or is about to have — whichever is more, since a strip on
+  its way out has not given anything back yet — and only ever as wide as the
+  scroll past the listing's end is, so a listing that is not sitting at its end
+  has none and the band is never more than the strip's own growth (`FOOTER_GROWTH`).
+  Inside that space the box is held at the shape of the row just left until the
+  new one is known, so it
   neither blinks between rows nor is ever drawn at a shape it is about to leave;
   only the first media row of a run, whose shape has never been known, shows a
   bare spinner in the reserved space instead. The box is then drawn at the
