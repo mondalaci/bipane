@@ -82,6 +82,9 @@ src/renderer/src/lib/preview.ts              what a row is previewable as (image
 src/renderer/src/lib/monaco.ts               lazy monaco import + worker wiring
 src/renderer/src/lib/fileIcon.ts             per-entry icon: name/extension -> 24x24 svg
                                              (FILENAME_ICONS, EXTENSION_ICONS, fallback text)
+src/renderer/src/lib/swapAnimation.ts        how a Ctrl+U exchange is shown: copies of
+                                             both panes travelling to the other column,
+                                             and the layer they travel in (styles/swap.css)
 ```
 
 Keys: `Tab` switches panes, arrows/`Home`/`End`/`PgUp`/`PgDn` move the cursor
@@ -99,7 +102,10 @@ shell) at the right of the tab strip, focused — `Ctrl+W` closes the active one
 next/previous workspace, `Shift+Ctrl+PageDown`/`Shift+Ctrl+PageUp` (or dragging a
 tab) move the active workspace right/left in the strip, `Ctrl+U` swaps the two
 panels (each keeps its cursor,
-marks and filter),
+marks and filter) — the panes change columns in one frame, since the swap is a
+rebinding and not a redraw, so the exchange is shown as copies of both of them
+travelling to the other column — except with a display up, whose dismissal is
+already its own gesture, where the swap goes through unanimated,
 `Alt+S` starts an incremental search, `F5` copies the marked entries (or the
 cursor row) into the other pane, `F6` moves them there (its destination field
 names a directory to move into, but for a single entry a path that is not a

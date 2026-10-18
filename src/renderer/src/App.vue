@@ -16,6 +16,7 @@ import {
   type PlaybackClock,
   type StageRequest
 } from '@renderer/lib/preview'
+import { playSwapAnimation } from '@renderer/lib/swapAnimation'
 import type { PanelSide } from '@shared/types'
 
 /**
@@ -228,10 +229,27 @@ function setActive(side: PanelSide): void {
 }
 
 function swapPanels(): void {
-  // The two panes change places, and with them which cursor a display would be
-  // following, so a display up at the time goes.
+  // A display goes whatever swapped the panes, but its own gesture is the media
+  // shrinking back onto the thumbnail it came from, so the exchange goes through
+  // unanimated rather than as a second motion under that one.
+  const wasDisplaying = stageSide.value !== null
   exitStage()
-  activeWorkspace.value.swapPanels()
+
+  const host = panelHost.value
+  const leftPane = leftPanel.value?.$el as HTMLElement | undefined
+  const rightPane = rightPanel.value?.$el as HTMLElement | undefined
+
+  if (wasDisplaying || !host || !leftPane || !rightPane) {
+    activeWorkspace.value.swapPanels()
+    return
+  }
+
+  playSwapAnimation({
+    host,
+    left: leftPane,
+    right: rightPane,
+    apply: () => activeWorkspace.value.swapPanels()
+  })
 }
 
 function setTerminalFocused(value: boolean): void {

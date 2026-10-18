@@ -1,0 +1,21 @@
+/*
+ * The layer the card shuffle draws over the two panes (see lib/swapAnimation.ts).
+ * One is created per pane for the length of the slide and removed with it, and
+ * both are inert: they are pictures of panes, so a click has to fall through
+ * them to the pane underneath rather than land on a copy that is about to
+ * disappear.
+ *
+ * They sit at z-20 inside the pane host — above the panes (which carry no
+ * z-index of their own) and below the viewer overlay, which is a later sibling
+ * of the host at the same depth.
+ */
+.swap-layer {
+  position: absolute;
+  z-index: 20;
+  pointer-events: none;
+}
+
+/* One pane, held still while it travels to the other column. */
+.swap-ghost {
+  overflow: hidden;
+}
