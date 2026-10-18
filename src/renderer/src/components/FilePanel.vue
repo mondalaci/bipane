@@ -1228,7 +1228,7 @@ function onRenameBlur(): void {
         class="flex h-7 shrink-0 items-center gap-2 border-b border-border-subtle px-3"
         :class="active ? 'bg-accent text-fg-bright' : 'bg-surface text-fg-dim'"
       >
-        <span class="truncate font-mono text-ui-sm" :title="controller.state.path">
+        <span class="truncate font-mono text-ui-sm">
           {{ controller.state.path || '—' }}
         </span>
         <span

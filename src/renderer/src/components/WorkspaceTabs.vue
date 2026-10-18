@@ -89,7 +89,6 @@ function onDrop(event: DragEvent): void {
         <button
           type="button"
           class="max-w-44 truncate pl-2 pr-1 text-ui-sm"
-          :title="tab.label"
           @click="emit('select', index)"
         >
           {{ tab.label }}
