@@ -1015,6 +1015,48 @@ function seekStage(delta: number): void {
   seek(stageMedia.value, delta)
 }
 
+/**
+ * The wheel's steps. A plain wheel matches the ten-second arrows and the two
+ * modifiers match the Ctrl keys: the left button a minute, the right button ten.
+ */
+const WHEEL_STEP_SECONDS = 10
+const WHEEL_STEP_MINUTE = 60
+const WHEEL_STEP_TEN_MINUTES = 600
+
+/**
+ * Scrub the clip under the wheel. A wheel-up goes forward and a wheel-down
+ * back, by the step the held button picks out.
+ *
+ * Scoped to the media itself: the wheel over a clip scrubs it, while the wheel
+ * over the listing still scrolls the listing, and a box with no clip leaves the
+ * event alone so nothing is swallowed on its account.
+ */
+function wheelScrub(
+  event: WheelEvent,
+  element: HTMLVideoElement | HTMLImageElement | null
+): void {
+  if (!(element instanceof HTMLVideoElement) || event.deltaY === 0) return
+
+  const step =
+    event.buttons & 2
+      ? WHEEL_STEP_TEN_MINUTES
+      : event.buttons & 1
+        ? WHEEL_STEP_MINUTE
+        : WHEEL_STEP_SECONDS
+
+  event.preventDefault()
+  event.stopPropagation()
+  seek(element, event.deltaY < 0 ? step : -step)
+}
+
+function onFooterWheel(event: WheelEvent): void {
+  wheelScrub(event, previewVideo.value)
+}
+
+function onStageWheel(event: WheelEvent): void {
+  wheelScrub(event, stageMedia.value)
+}
+
 defineExpose({ previewRect, previewPosition, seekPreview, seekStage })
 
 // Kept out of the <ul> on purpose: the row list must contain exactly the
@@ -1361,6 +1403,7 @@ function onRenameBlur(): void {
             ref="previewEl"
             :style="previewBoxStyle"
             class="relative flex shrink-0 items-center justify-center overflow-hidden rounded border border-border-subtle bg-bg"
+            @wheel="onFooterWheel"
           >
             <img
               v-if="showImage"
@@ -1455,6 +1498,7 @@ function onRenameBlur(): void {
       @mousedown.stop
       @click.stop
       @dblclick.stop
+      @wheel="onStageWheel"
     >
       <div v-if="shownStage" class="relative flex min-h-0 grow items-center justify-center p-3">
         <img

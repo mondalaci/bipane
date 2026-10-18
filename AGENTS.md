@@ -88,9 +88,12 @@ src/renderer/src/lib/swapAnimation.ts        how a Ctrl+U exchange is shown: cop
 ```
 
 Keys: `Tab` switches panes, arrows/`Home`/`End`/`PgUp`/`PgDn` move the cursor
-(`←`/`→` step the clip being previewed by ten seconds while the command line is
-empty; with anything typed there — or in an open search box — they are the line's
-own keys again), `Enter` descends or opens with the system default app — except on an image or a
+(`←`/`→` step the clip being previewed by ten seconds, and `Ctrl+J`/`Ctrl+L` by
+a minute back/forward while `Ctrl+H`/`Ctrl+;` step it by ten minutes — all only
+while the command line is empty; with anything typed there — or in an open search
+box — the arrows are the line's own keys again and the Ctrl steps belong to the
+shell, whose `Ctrl+H` is backspace, `Ctrl+L` clear-screen and `Ctrl+J`
+accept-line), `Enter` descends or opens with the system default app — except on an image or a
 video, which it displays in the other pane instead (see below), `F3` opens a regular file
 read-only in the Monaco viewer, `F4` opens it for editing with Ctrl+S to save (a
 directory still descends on `F3`), `Insert` marks the current entry and moves down,
@@ -352,11 +355,17 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   element otherwise — the clock is read from `loadeddata` rather than
   `durationchange` for exactly that reason, since the earlier of the two fires
   before the hand-back has been applied. With the command line
-  empty the arrow keys are a scrubber for what is showing (`seekPreview` steps
+  empty the arrow keys — and the coarser `Ctrl+J`/`Ctrl+L` (a minute) and
+  `Ctrl+H`/`Ctrl+;` (ten) steps — are a scrubber for what is showing
+  (`seekPreview` steps
   the footer's clip and, when a display is up, the same clip in the other pane, so
   the two cannot drift apart): stepping back into a clip that had played itself
   out plays on from there, and stepping past its end stops there — the end of a
-  clip is not quietly its beginning again.
+  clip is not quietly its beginning again. The wheel over a clip is a scrubber
+  too (`wheelScrub` in `FilePanel`): a plain wheel steps it ten seconds, the
+  left button held a minute and the right button ten — wheel-up forward — and it
+  is bound to the media box and the display rather than the whole pane, so the
+  wheel over the listing still scrolls the listing.
 - **A clip Chromium cannot play is transcoded, when ffmpeg is there to do it.**
   Chromium has no demuxer for AVI or ASF, and no decoder for the motion JPEG of
   an old camcorder AVI or the WMV3/VC-1 of an ASF one — `canPlayType` answers no

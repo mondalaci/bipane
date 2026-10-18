@@ -208,6 +208,18 @@ function exitStage(): void {
 const SEEK_SECONDS = 10
 
 /**
+ * How far the coarser playback keys step: Ctrl+J/Ctrl+L a minute back and
+ * forward, Ctrl+H/Ctrl+; ten. Keyed by the lower-cased `event.key` that fires
+ * each, so `;` needs no special case.
+ */
+const SEEK_STEPS: Readonly<Record<string, number>> = {
+  j: -60,
+  l: 60,
+  h: -600,
+  ';': 600
+}
+
+/**
  * Step through the clip being previewed: the one under the cursor of the pane
  * being navigated, and — when a display is up — the same clip as the other pane
  * is showing, so the two never drift apart.
@@ -573,6 +585,21 @@ function handlePaneKey(event: KeyboardEvent): void {
     consume(event)
     swapPanels()
     return
+  }
+
+  // The coarser companions to the ten-second arrows: Ctrl+J/Ctrl+L step the
+  // clip being previewed by a minute, Ctrl+H/Ctrl+; by ten. Like the arrows
+  // they are the clip's only while the command line has nothing typed in it —
+  // Ctrl+H is the line editor's backspace, Ctrl+L clears the terminal screen
+  // and Ctrl+J accepts the line — and an expanded, focused terminal never
+  // reaches here at all.
+  if (isPlainCtrl(event) && !searching && !hasInput) {
+    const step = SEEK_STEPS[event.key.toLowerCase()]
+    if (step !== undefined) {
+      consume(event)
+      seekPreview(step)
+      return
+    }
   }
 
   if (event.ctrlKey || event.altKey || event.metaKey) return
