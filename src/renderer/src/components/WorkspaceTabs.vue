@@ -62,7 +62,7 @@ function onDrop(event: DragEvent): void {
 
 <template>
   <div
-    class="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
+    class="flex min-w-0 items-center gap-1 overflow-x-auto"
     @dragover.prevent
     @drop="onDrop"
   >

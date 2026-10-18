@@ -55,9 +55,11 @@ function onDoubleClick(event: MouseEvent): void {
       </svg>
     </div>
 
-    <div class="no-drag ml-3 flex min-w-0 flex-1 items-center">
+    <div class="no-drag ml-3 flex min-w-0 items-center">
       <slot />
     </div>
+
+    <div class="drag-region h-full min-w-2 flex-1" aria-hidden="true"></div>
 
     <div class="no-drag flex h-full shrink-0 items-stretch gap-1">
       <button
