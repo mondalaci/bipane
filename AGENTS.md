@@ -37,7 +37,9 @@ src/main/imageSize.ts    header-only image dimensions (PNG/JPEG+EXIF/GIF/BMP/
 src/main/media.ts        the bipane-media scheme a footer plays a video through:
                          a ranged byte stream, so the element fetches the
                          metadata and the frames it needs rather than a
-                         hundred-megabyte file
+                         hundred-megabyte file; it also encodes what Chromium
+                         cannot play at all, and answers whether that is
+                         possible here (fs:can-transcode)
 src/main/ipc/watch.ts    IPC: fs:watch, fs:unwatch; pushes fs:changed when a
                          watched directory's contents change (fs.watch = inotify)
 src/main/ipc/pty.ts      IPC: pty:create/write/resize/kill/state, pushes pty:data, pty:exit
@@ -48,7 +50,8 @@ src/shared/types.ts      DirEntry/DirListing/Result/ImagePreview/PixelSize/
 src/shared/api.ts        BipaneApi interface (the preload contract)
 src/shared/image.ts      extension -> previewable image MIME map, shared so the
                          renderer and main agree on what a footer may preview
-src/shared/video.ts      the same for video, plus the media scheme's name
+src/shared/video.ts      the same for video, plus the extensions only ffmpeg
+                         can make playable, and the media scheme's name
 src/renderer/src/App.vue global keyboard model, workspace stack, layout, focus
 src/renderer/src/components/TitleBar.vue     frameless title bar + window controls;
                                              hosts the workspace tab strip
@@ -78,8 +81,10 @@ src/renderer/src/lib/fileIcon.ts             per-entry icon: name/extension -> 2
                                              (FILENAME_ICONS, EXTENSION_ICONS, fallback text)
 ```
 
-Keys: `Tab` switches panes, arrows/`Home`/`End`/`PgUp`/`PgDn` move the cursor,
-`Enter` descends or opens with the system default app — except on an image or a
+Keys: `Tab` switches panes, arrows/`Home`/`End`/`PgUp`/`PgDn` move the cursor
+(`←`/`→` step the clip being previewed by ten seconds while the command line is
+empty; with anything typed there — or in an open search box — they are the line's
+own keys again), `Enter` descends or opens with the system default app — except on an image or a
 video, which it displays in the other pane instead (see below), `F3` opens a regular file
 read-only in the Monaco viewer, `F4` opens it for editing with Ctrl+S to save (a
 directory still descends on `F3`), `Insert` marks the current entry and moves down,
@@ -199,9 +204,14 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   file the renderer has no URL for: the extension->MIME map lives in
   `src/shared/image.ts` so both sides agree on what is previewable, main returns
   a `data:` URL (the renderer CSP allows `img-src data:` but not `file:`), and
-  `FilePanel` reserves the space from the moment the cursor lands on an image,
-  so arrowing between images does not collapse and re-expand the list on every
-  step — and it reserves it at the picture's own shape: `fs:image-size` reads
+  `FilePanel` reserves the space from the moment the cursor lands on media — the
+  extension says it is, before anything has been read — so stepping between clips
+  never collapses the footer and pushes the list back up. Inside that space the
+  box is held at the shape of the row just left until the new one is known, so it
+  neither blinks between rows nor is ever drawn at a shape it is about to leave;
+  only the first media row of a run, whose shape has never been known, shows a
+  bare spinner in the reserved space instead. The box is then drawn at the
+  picture's own shape: `fs:image-size` reads
   only the header (`src/main/imageSize.ts`, no decode), so the box is the right
   ratio with a spinner in it before the image arrives, and nothing jumps when it
   does. That probe is issued on the cursor move itself, while the read waits out
@@ -269,7 +279,41 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   pane's `previewRect()`), and released. It plays once per *entry* into the mode,
   guarded by `stage.animation`, so arrowing through a folder swaps the display in
   place rather than re-animating on every row — and a row whose thumbnail is not
-  up yet has nothing to grow from, so it simply appears.
+  up yet has nothing to grow from, so it simply appears. With the command line
+  empty the arrow keys are a scrubber for what is showing (`seekPreview` steps
+  the footer's clip and, when a display is up, the same clip in the other pane, so
+  the two cannot drift apart): stepping back into a clip that had played itself
+  out plays on from there, and stepping past its end stops there — the end of a
+  clip is not quietly its beginning again.
+- **A clip Chromium cannot play is transcoded, when ffmpeg is there to do it.**
+  Chromium has no demuxer for AVI or ASF, and no decoder for the motion JPEG of
+  an old camcorder AVI or the WMV3/VC-1 of an ASF one — `canPlayType` answers no
+  for every one of them — so `src/shared/video.ts` keeps a second extension list
+  of what only ffmpeg can make playable, and main encodes those into H.264 for
+  the same `bipane-media` stream (muted, at most five minutes, at most 720px).
+  The encode is streamed out **as it is produced** (`empty_moov` +
+  `frag_keyframe`, a keyframe every thirty frames): a plain mp4 has no header
+  until its encode has ended, so waiting for one would mean a black box for the
+  length of the whole clip, and following the file as it grows is what puts the
+  first frame on screen a third of a second in instead. That first play is a live
+  stream, so it has no usable `seekable` range and the arrow keys do nothing on
+  it; the clip becomes seekable the next time it is shown, once its encode is
+  complete and cached. However many elements ask for a clip — a footer playing it
+  and a display showing it — they share one encode.
+  The five minutes are why the arrow keys are meaningful on such a file: the clip
+  is what they step through, and a twenty-second encode of a three-minute
+  camcorder AVI left every step landing on its end — while a feature-length file
+  is still neither worth encoding to fill a 64px box nor worth keeping in the
+  temp directory. Each result is cached in a per-run directory under the temp
+  path, which is what makes stepping back onto a row free and lets a display loop
+  a clip without encoding it again (the cache holds a bounded number of encodes
+  and a bounded number of bytes, since a long clip's encode is not small) — and
+  that directory is removed as synchronous work on the way out, because a delete
+  left to run in the background outlives the process that was going to wait for
+  it. All of this is gated on ffmpeg existing: the renderer asks once
+  (`fs:can-transcode`) and, with no answer, those files are not media at all —
+  `Enter` opens them in the system player, exactly as before that list existed.
+  `BIPANE_FFMPEG` names the binary for a machine that keeps it off the PATH.
 - **Intercepted keys must `stopPropagation`, not just `preventDefault`.** xterm
   handles keys from a capture listener on its own textarea and does *not* consult
   `defaultPrevented`, so a merely-prevented navigation key is still forwarded to

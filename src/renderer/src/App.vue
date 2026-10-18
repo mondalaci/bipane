@@ -9,7 +9,7 @@ import TitleBar from '@renderer/components/TitleBar.vue'
 import FileViewer from '@renderer/components/FileViewer.vue'
 import { createWorkspace, type Workspace } from '@renderer/composables/useWorkspace'
 import type { PaneController, PaneEntry } from '@renderer/composables/useDirectory'
-import { previewTargetFor, type StageRequest } from '@renderer/lib/preview'
+import { loadTranscodeSupport, previewTargetFor, type StageRequest } from '@renderer/lib/preview'
 import type { PanelSide } from '@shared/types'
 
 /**
@@ -147,6 +147,25 @@ function toggleStage(): void {
 
 function exitStage(): void {
   stageSide.value = null
+}
+
+/**
+ * How far the arrow keys step through a clip while the command line is empty.
+ */
+const SEEK_SECONDS = 10
+
+/**
+ * Step through the clip being previewed: the one under the cursor of the pane
+ * being navigated, and — when a display is up — the same clip as the other pane
+ * is showing, so the two never drift apart.
+ */
+function seekPreview(delta: number): void {
+  const active = activeSide.value === 'left' ? leftPanel : rightPanel
+  active.value?.seekPreview(delta)
+
+  if (stageSide.value === null) return
+  const showing = stageSide.value === 'left' ? leftPanel : rightPanel
+  showing.value?.seekStage(delta)
 }
 
 const panelHost = ref<HTMLElement | null>(null)
@@ -512,6 +531,17 @@ function handlePaneKey(event: KeyboardEvent): void {
   }
 
   switch (event.key) {
+    case 'ArrowLeft':
+    case 'ArrowRight': {
+      // With nothing typed on the command line the arrows have no line to edit,
+      // so they step through the clip being previewed instead — back or forward
+      // by ten seconds. A typed line, or an open search box, takes them back:
+      // there they belong to the text, not to the clip.
+      if (searching || hasInput) return
+      consume(event)
+      seekPreview(event.key === 'ArrowLeft' ? -SEEK_SECONDS : SEEK_SECONDS)
+      break
+    }
     case 'ArrowDown':
       consume(event)
       pane.moveCursor(1)
@@ -725,6 +755,9 @@ document.addEventListener('focusout', onFocusDrop)
 
 onMounted(() => {
   for (const workspace of workspaces.value) void workspace.init()
+  // What a file is previewable as depends on whether main can transcode what
+  // Chromium cannot play, so the answer is asked for before any cursor lands.
+  void loadTranscodeSupport()
 })
 
 onBeforeUnmount(() => {

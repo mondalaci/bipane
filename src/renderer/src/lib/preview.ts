@@ -1,18 +1,37 @@
+import { ref } from 'vue'
 import { imageMimeFor } from '@shared/image'
-import { videoMimeFor } from '@shared/video'
+import { needsTranscode, videoMimeFor } from '@shared/video'
 import type { PaneEntry } from '@renderer/composables/useDirectory'
+
+/**
+ * Whether main can transcode what Chromium cannot play itself. Until the answer
+ * is in, those files are not treated as previewable at all — which is also the
+ * answer when ffmpeg is missing, and what keeps Enter opening such a file in the
+ * system's own player rather than displaying nothing.
+ */
+const transcode = ref(false)
+
+export function canTranscodePreview(): boolean {
+  return transcode.value
+}
+
+/** Ask main once, early, so the answer is there before a cursor lands on a file. */
+export async function loadTranscodeSupport(): Promise<void> {
+  transcode.value = await window.bipane.fs.canTranscode()
+}
 
 /** What a pane can show of the cursor's row: an image, or a video. */
 export type PreviewKind = 'image' | 'video'
 
 /**
- * What a name is previewable as, or null when it is neither. The two shared
- * extension maps are the same ones main reads and streams by, so a pane only
- * ever asks for something it can be given.
+ * What a name is previewable as, or null when it is neither. The shared
+ * extension maps are the same ones main reads, streams and transcodes by, so a
+ * pane only ever asks for something it can be given.
  */
 export function previewKindFor(name: string): PreviewKind | null {
   if (imageMimeFor(name)) return 'image'
-  if (videoMimeFor(name)) return 'video'
+  if (videoMimeFor(name) !== null) return 'video'
+  if (canTranscodePreview() && needsTranscode(name)) return 'video'
   return null
 }
 

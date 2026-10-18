@@ -24,6 +24,7 @@ const api: BipaneApi = {
       ipcRenderer.invoke('fs:read-image', target),
     imageSize: (target: string): Promise<PixelSize | null> =>
       ipcRenderer.invoke('fs:image-size', target),
+    canTranscode: (): Promise<boolean> => ipcRenderer.invoke('fs:can-transcode'),
     write: (target: string, text: string): Promise<Result<string>> =>
       ipcRenderer.invoke('fs:write', target, text),
     open: (target: string) => ipcRenderer.invoke('fs:open', target),

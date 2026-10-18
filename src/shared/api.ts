@@ -36,6 +36,12 @@ export interface BipaneFsApi {
    */
   imageSize(target: string): Promise<PixelSize | null>
   /**
+   * Whether main can transcode a clip Chromium has no decoder or demuxer for
+   * (an old camcorder AVI, a WMV). False without ffmpeg on the machine, in
+   * which case those files are not previewable and are simply opened instead.
+   */
+  canTranscode(): Promise<boolean>
+  /**
    * Overwrite a regular text file with edited content (the editor's save).
    * Returns the resolved path that was written.
    */

@@ -63,9 +63,32 @@ const frame = ref<string | null>(null)
  */
 const settled = ref(false)
 
-const previewVisible = computed(
-  () => previewState.value === 'loading' || previewState.value === 'ready'
-)
+/**
+ * Whether the footer is at its tall size. It is, from the moment the cursor is
+ * on media — the extension says so, before anything has been read — so stepping
+ * between clips never collapses the strip and pushes the list back up.
+ */
+const footerTall = computed(() => previewTarget.value !== null)
+
+/**
+ * Whether the preview box itself is on screen. It is up while a preview loads or
+ * is ready, and while a *new* row's shape is still unknown it stays up at the
+ * shape of the row just left, so the box is a steady thing to look at. Only the
+ * first media row of a run — whose shape has never been known — has no box yet.
+ */
+const previewVisible = computed(() => {
+  if (previewTarget.value === null) return false
+  if (previewState.value === 'loading' || previewState.value === 'ready') return true
+  return previewState.value === 'probing' && sizeHint.value !== null
+})
+
+/**
+ * Whether the tall footer is reserved with nothing drawn in it yet: the first
+ * row of a run, until its shape is known. The space is held at the box's own
+ * height, so nothing about the footer moves when the box arrives — a bare
+ * spinner is what shows in the meantime.
+ */
+const previewWaiting = computed(() => footerTall.value && !previewVisible.value)
 
 /**
  * The stream URL for a video. The file is served by main, ranged, so an element
@@ -88,7 +111,15 @@ const showVideo = computed(
     settled.value &&
     previewState.value !== 'failed'
 )
-const showSpinner = computed(() => previewState.value === 'loading')
+/**
+ * Whether the box is still waiting for its picture. It is, for as long as the box
+ * is on screen with no frame in it — and for a clip main has to transcode first
+ * that is the whole encode, seconds of a strip that otherwise shows an empty box
+ * and looks broken while nothing appears to happen.
+ */
+const showSpinner = computed(
+  () => previewVisible.value && previewState.value !== 'ready'
+)
 
 const PREVIEW_HEIGHT = 64
 const PREVIEW_MAX_WIDTH = 160
@@ -343,13 +374,61 @@ function onStageError(): void {
  */
 const previewEl = ref<HTMLElement | null>(null)
 
+/** The footer's own clip, while one is playing there. */
+const previewVideo = ref<HTMLVideoElement | null>(null)
+
 function previewRect(): DOMRect | null {
   const element = previewEl.value
   if (!element || element.offsetParent === null) return null
   return element.getBoundingClientRect()
 }
 
-defineExpose({ previewRect })
+/**
+ * Step through a clip by `delta` seconds, which is what the arrow keys do while
+ * the command line has nothing typed in it.
+ *
+ * Stepping back into a clip that had played itself out plays on from there,
+ * rather than leaving a frozen last frame behind a key that clearly asked to see
+ * more; stepping past its end does not, so the end of a clip is the end of it
+ * and not quietly the beginning again.
+ */
+function seek(element: HTMLVideoElement | HTMLImageElement | null, delta: number): void {
+  if (!(element instanceof HTMLVideoElement)) return
+
+  const duration = element.duration
+  if (!Number.isFinite(duration) || duration <= 0) return
+
+  // Reading `ended` has to happen before the seek: moving the playhead anywhere
+  // but the end is what clears it.
+  const wasEnded = element.ended
+  const at = Math.min(Math.max(element.currentTime + delta, 0), duration)
+
+  // The clip has to have somewhere to move *to*. A clip main is still
+  // transcoding arrives as a growing stream, and a stream reports no usable
+  // range — Chromium gives a live source a single empty one — so the keys do
+  // nothing there rather than throwing the playhead back to the start. Once the
+  // encode is done the same clip is served as a whole file, ranges and all, and
+  // the keys work on it.
+  const ranges = element.seekable
+  let reachable = false
+  for (let i = 0; i < ranges.length; i += 1) {
+    if (ranges.end(i) > 0 && at >= ranges.start(i) && at <= ranges.end(i)) reachable = true
+  }
+  if (!reachable) return
+
+  element.currentTime = at
+  if (wasEnded && at < duration) void element.play().catch(() => {})
+}
+
+function seekPreview(delta: number): void {
+  seek(previewVideo.value, delta)
+}
+
+function seekStage(delta: number): void {
+  seek(stageMedia.value, delta)
+}
+
+defineExpose({ previewRect, seekPreview, seekStage })
 
 // Kept out of the <ul> on purpose: the row list must contain exactly the
 // entries, or index-based scrolling and the cursor watch would be off by one.
@@ -680,7 +759,7 @@ function onRenameBlur(): void {
 
     <div
       class="flex shrink-0 items-center justify-between gap-3 border-t border-border-subtle bg-surface px-3 text-ui-sm text-fg-dim"
-      :class="previewVisible ? 'py-1' : 'h-6'"
+      :class="footerTall ? 'py-1' : 'h-6'"
     >
       <div class="flex min-w-0 items-center gap-3">
         <!-- Shown/hidden with `v-show`, not `v-if`: a video hidden this way is
@@ -706,6 +785,7 @@ function onRenameBlur(): void {
                for as long as the cursor happens to rest on the row. -->
           <video
             v-else-if="showVideo"
+            ref="previewVideo"
             :src="videoUrl ?? undefined"
             muted
             autoplay
@@ -721,6 +801,14 @@ function onRenameBlur(): void {
             class="absolute h-3.5 w-3.5 animate-spin rounded-full border border-fg border-t-transparent"
           />
         </div>
+
+        <!-- The space the box will take, before its shape is known. Held at the
+             box's own height so the footer is already the size it will be. -->
+        <span v-if="previewWaiting" class="flex h-16 shrink-0 items-center">
+          <span
+            class="h-3.5 w-3.5 animate-spin rounded-full border border-fg border-t-transparent"
+          />
+        </span>
 
         <span class="shrink-0 tabular-nums">{{ controller.state.itemCount }} items</span>
       </div>

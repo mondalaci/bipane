@@ -5,7 +5,12 @@ import { registerFsHandlers } from './ipc/fs'
 import { killAllSessions, registerPtyHandlers } from './ipc/pty'
 import { closeAllWatchers, registerWatchHandlers } from './ipc/watch'
 import { registerWindowHandlers } from './ipc/window'
-import { registerMediaProtocol, registerMediaScheme } from './media'
+import {
+  killAllTranscodes,
+  registerMediaHandlers,
+  registerMediaProtocol,
+  registerMediaScheme
+} from './media'
 
 // The hardware video decoder hands its frames to the compositor as DMA-BUFs,
 // and a Linux session that cannot import those (a VM, a driver without a working
@@ -64,9 +69,11 @@ function createWindow(): BrowserWindow {
   return window
 }
 
-// The media scheme has to be declared before the app is ready; its handler is
-// installed once it is. Everything else is a plain IPC handler and can go now.
+// The media scheme has to be declared before the app is ready; its protocol
+// handler is installed once it is. Everything else is a plain IPC handler and
+// can go now.
 registerMediaScheme()
+registerMediaHandlers()
 registerFsHandlers()
 registerPtyHandlers()
 registerWatchHandlers()
@@ -99,5 +106,6 @@ if (!gotLock) {
   app.on('before-quit', () => {
     killAllSessions()
     closeAllWatchers()
+    killAllTranscodes()
   })
 }
