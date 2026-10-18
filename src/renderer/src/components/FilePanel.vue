@@ -266,16 +266,26 @@ function onImageError(): void {
 }
 
 /**
- * How long a display takes to grow out of the thumbnail it was asked for. It is
- * a translate *and* a scale of the same element — the media, laid out at its
- * final size, is animated back onto the footer's thumbnail and forward again —
- * so the two motions are one gesture rather than a move then a resize.
+ * How long a display takes to grow out of the thumbnail it was asked for, and to
+ * shrink back into it. It is a translate *and* a scale of the same element — the
+ * media, laid out at its final size, is animated back onto the footer's
+ * thumbnail and forward again — so the two motions are one gesture rather than a
+ * move then a resize. An enlarged clip's sound is ramped over the same length, so
+ * that it arrives and leaves with the picture it belongs to.
  */
 const STAGE_REVEAL_MS = 220
 
+/**
+ * The display on screen, which outlives the request for it while it is being
+ * dismissed: the media has to still be there to shrink back onto its thumbnail.
+ */
+const shownStage = ref<StageRequest | null>(null)
+
 /** The stream URL of the media another pane is displaying. */
 const stageVideoUrl = computed(() =>
-  props.stage && props.stage.target.kind === 'video' ? mediaUrlFor(props.stage.target.path) : null
+  shownStage.value && shownStage.value.target.kind === 'video'
+    ? mediaUrlFor(shownStage.value.target.path)
+    : null
 )
 
 /** An image being displayed on behalf of another pane, as a `data:` URL. */
@@ -298,8 +308,14 @@ const showStageVideo = computed(
 /** The reveal already played for this entry into the mode, so a swap in place is not re-animated. */
 let stageAnimation = -1
 
-/** The element being displayed, for measuring the reveal. */
+/** The element being displayed, for measuring the reveal and its reverse. */
 const stageMedia = ref<HTMLImageElement | HTMLVideoElement | null>(null)
+
+/** The dismissal in flight, so that a display asked for again can call it off. */
+let stageDismissal: Animation | null = null
+
+/** Which sound ramp is the current one, so a leaving one stops when another starts. */
+let stageSound = 0
 
 let stageToken = 0
 
@@ -307,44 +323,127 @@ let stageToken = 0
  * Display the media another pane asked for. There is no settle here: the user
  * asked for this file by pressing Enter on it, so it loads at once — an image
  * through main's cache, which the footer's own read usually filled in already.
+ * A request that arrives while the last display is still shrinking away calls
+ * that off and keeps what is on screen.
  */
 watch(
-  () => {
-    const stage = props.stage
-    return stage ? previewKeyFor(stage.target) : null
-  },
-  (key) => {
-    const token = (stageToken += 1)
-    stageFrame.value = null
-    stageState.value = key === null ? 'idle' : 'loading'
-    if (key === null) return
-
-    const stage = props.stage
-    if (!stage || stage.target.kind !== 'image') return
-
-    void window.bipane.fs.readImage(stage.target.path).then((result) => {
-      if (token !== stageToken) return
-      if (result.ok) stageFrame.value = result.data.dataUrl
-      else stageState.value = 'failed'
-    })
+  () => props.stage,
+  (stage) => {
+    if (stage) {
+      stageDismissal?.cancel()
+      stageDismissal = null
+      shownStage.value = stage
+      raiseStageSound()
+      void loadStage(stage)
+      return
+    }
+    if (shownStage.value !== null) void dismissStage()
   },
   { immediate: true }
 )
+
+async function loadStage(stage: StageRequest): Promise<void> {
+  const key = previewKeyFor(stage.target)
+  const token = (stageToken += 1)
+  stageFrame.value = null
+  stageState.value = key === null ? 'idle' : 'loading'
+  if (stage.target.kind !== 'image') return
+
+  const result = await window.bipane.fs.readImage(stage.target.path)
+  if (token !== stageToken) return
+  if (result.ok) stageFrame.value = result.data.dataUrl
+  else stageState.value = 'failed'
+}
+
+/**
+ * Ramp a clip's volume towards `to`, so its sound arrives with the picture it
+ * belongs to rather than a beat before it — and leaves with it. A clip faded out
+ * ends up muted, so nothing escapes after it. A ramp superseded by another stops
+ * where it is, which is what lets a display that is coming back carry on from
+ * the volume it had reached.
+ *
+ * The ramp follows frame callbacks, which is the smooth path — but those stop
+ * while the window is hidden, and a dismissal waits on this, so it is bounded in
+ * time as well and always finishes.
+ */
+function fadeVolume(element: HTMLMediaElement, to: number, duration: number): Promise<void> {
+  const ramp = (stageSound += 1)
+
+  return new Promise((resolve) => {
+    const started = performance.now()
+    const from = element.volume
+    let backstop = 0
+    let settled = false
+
+    const finish = (): void => {
+      if (settled) return
+      settled = true
+      window.clearTimeout(backstop)
+      if (ramp === stageSound) {
+        element.volume = to
+        if (to === 0) element.muted = true
+      }
+      resolve()
+    }
+
+    backstop = window.setTimeout(finish, duration + 120)
+
+    const step = (): void => {
+      if (ramp !== stageSound) {
+        finish()
+        return
+      }
+
+      const elapsed = performance.now() - started
+      const ratio = duration <= 0 ? 1 : Math.min(elapsed / duration, 1)
+      element.volume = from + (to - from) * ratio
+      if (ratio < 1) {
+        requestAnimationFrame(step)
+        return
+      }
+      finish()
+    }
+
+    requestAnimationFrame(step)
+  })
+}
+
+/**
+ * Bring an enlarged clip's sound up, from wherever it has got to. Called when a
+ * display arrives, and when one that was leaving is asked for again.
+ */
+function raiseStageSound(): void {
+  const element = stageMedia.value
+  if (!(element instanceof HTMLVideoElement)) return
+
+  element.muted = false
+  void fadeVolume(element, 1, STAGE_REVEAL_MS)
+}
 
 /**
  * Reveal the display: measure where it has laid itself out, put it back onto the
  * thumbnail it grew out of, and let it travel forward into place. One element
  * carries both motions, so the translate and the scale are a single gesture
  * rather than a move followed by a resize.
+ *
+ * An enlarged clip is being watched rather than glanced at, so this is also
+ * where its sound comes up — the footer's own thumbnail stays silent — from
+ * silence, so that it arrives over the length the picture takes to arrive in.
  */
 function onStageShown(): void {
   stageState.value = 'ready'
 
-  const stage = props.stage
+  const stage = shownStage.value
   const element = stageMedia.value
   if (!stage || !element) return
 
-  // One reveal per entry into the mode: a swap in place while the mode is
+  if (element instanceof HTMLVideoElement) {
+    element.muted = false
+    element.volume = 0
+    void fadeVolume(element, 1, STAGE_REVEAL_MS)
+  }
+
+  // One reveal per entry into the mode: a swap in place while the display is
   // already up is not something to re-animate for every row the cursor crosses.
   if (stage.animation === stageAnimation) return
   stageAnimation = stage.animation
@@ -366,6 +465,59 @@ function onStageShown(): void {
     ],
     { duration: STAGE_REVEAL_MS, easing: 'ease-out' }
   )
+}
+
+/**
+ * Put the display away: shrink it back onto the thumbnail it came from, fade its
+ * sound out with it, and only then take it off screen. The request is held onto
+ * until this is done, because the element has to still be there to move.
+ */
+async function dismissStage(): Promise<void> {
+  const stage = shownStage.value
+  const element = stageMedia.value
+
+  if (stage === null || element === null) {
+    shownStage.value = null
+    stageState.value = 'idle'
+    return
+  }
+
+  const from = element.getBoundingClientRect()
+  const to = stage.from()
+
+  let moving: Promise<void> = Promise.resolve()
+  let shrink: Animation | null = null
+  if (to !== null && from.width > 0 && from.height > 0) {
+    shrink = element.animate(
+      [
+        { transform: 'none' },
+        {
+          transform: `translate(${to.left - from.left}px, ${to.top - from.top}px) scale(${
+            to.width / from.width
+          }, ${to.height / from.height})`
+        }
+      ],
+      { duration: STAGE_REVEAL_MS, easing: 'ease-in', fill: 'forwards' }
+    )
+    stageDismissal = shrink
+    // A cancelled animation rejects here, which is not a failure: the request
+    // that replaced this one owns the display now.
+    moving = shrink.finished.then(
+      () => {},
+      () => {}
+    )
+  }
+
+  const silenced =
+    element instanceof HTMLVideoElement ? fadeVolume(element, 0, STAGE_REVEAL_MS) : Promise.resolve()
+
+  await Promise.all([moving, silenced])
+
+  if (stageDismissal === shrink) stageDismissal = null
+  if (shownStage.value !== stage) return
+
+  shownStage.value = null
+  stageState.value = 'idle'
 }
 
 function onStageError(): void {
@@ -929,7 +1081,7 @@ function onRenameBlur(): void {
          thing on screen: the media. Pointer events stop here so a click cannot
          move the cursor's pane away from the one being navigated. -->
     <div
-      v-if="stage"
+      v-if="shownStage"
       class="absolute inset-0 z-20 flex flex-col bg-bg"
       @mousedown.stop
       @click.stop
@@ -938,7 +1090,7 @@ function onRenameBlur(): void {
       <div
         class="flex h-7 shrink-0 items-center border-b border-border-subtle bg-surface px-3 text-ui-sm text-fg-dim"
       >
-        <span class="min-w-0 truncate">{{ stage.target.name }}</span>
+        <span class="min-w-0 truncate">{{ shownStage?.target.name }}</span>
       </div>
 
       <div class="relative flex min-h-0 grow items-center justify-center p-3">
@@ -953,8 +1105,10 @@ function onRenameBlur(): void {
           @load="onStageShown"
           @error="onStageError"
         />
-        <!-- A display is for looking at, so the clip plays on and on here, still
-             muted; it is the footer's thumbnail that plays once and holds. -->
+        <!-- A display is for watching rather than glancing at, so the clip plays
+             on and on here with its sound — the element stays muted until the
+             reveal has it fade up, and a failure to load leaves it silent. The
+             footer's own thumbnail is the one that plays once, and silently. -->
         <video
           v-else-if="showStageVideo"
           ref="stageMedia"

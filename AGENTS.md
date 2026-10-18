@@ -245,8 +245,8 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   be read whole the way an image can — one frame's worth is a hundred megabytes
   here — so main serves it as a ranged byte stream on its own `bipane-media`
   scheme (`src/main/media.ts`) and the footer mounts a `<video>` on it. The
-  element is muted (a preview never makes a sound) and plays once rather than
-  looping: a looping 4K clip decodes for as long as the cursor happens to rest
+  element is muted — it is the *display*, not the thumbnail, that makes a sound
+  when a clip is enlarged — and it plays once rather than looping: a looping 4K clip decodes for as long as the cursor happens to rest
   on the row, measured at over half a core. Its box shows a spinner for as long
   as the box is up without a frame in it — which for a clip main has to encode
   before any of it can play is the whole of that wait. Beside the thumbnail the
@@ -288,7 +288,18 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   pane's `previewRect()`), and released. It plays once per *entry* into the mode,
   guarded by `stage.animation`, so arrowing through a folder swaps the display in
   place rather than re-animating on every row — and a row whose thumbnail is not
-  up yet has nothing to grow from, so it simply appears. With the command line
+  up yet has nothing to grow from, so it simply appears. Leaving the mode plays
+  the same gesture backwards and waits for it: the media shrinks back onto the
+  thumbnail it came from and is only taken off screen when it has arrived, so
+  `FilePanel` holds the request it is showing (`shownStage`) past the prop that
+  asked for it, and a display asked for again mid-dismissal calls the shrink off
+  instead of flickering. A display is watched rather than glanced at, so an
+  enlarged clip is the one thing that makes a sound: its element stays muted
+  until the reveal, then its volume is ramped up over the reveal's own length,
+  and ramped back down — ending muted — as it shrinks away. The footer's own
+  thumbnail stays silent throughout. The ramp follows frame callbacks for
+  smoothness but is bounded in time as well, because those stop while the window
+  is hidden and a dismissal waits on it. With the command line
   empty the arrow keys are a scrubber for what is showing (`seekPreview` steps
   the footer's clip and, when a display is up, the same clip in the other pane, so
   the two cannot drift apart): stepping back into a clip that had played itself
