@@ -987,7 +987,7 @@ onBeforeUnmount(() => {
       <main
         ref="panelHost"
         tabindex="-1"
-        class="flex min-h-0 shrink basis-0 overflow-hidden outline-none transition-[flex-grow] duration-150 ease-out"
+        class="isolate flex min-h-0 shrink basis-0 overflow-hidden outline-none transition-[flex-grow] duration-150 ease-out"
         :class="terminalExpanded ? 'grow-0' : 'grow'"
       >
         <FilePanel
@@ -1009,8 +1009,13 @@ onBeforeUnmount(() => {
         <!-- The boundary between the panes, and the handle that moves it: the
              line stays a pixel, while an invisible band around it is what the
              pointer actually grabs. The re-centre button hangs off its bottom
-             once the split has been dragged off-centre. -->
-        <div class="relative w-px shrink-0 bg-border">
+             once the split has been dragged off-centre. The handle rides above
+             the panes (`z-30`) because half the button overhangs one of them,
+             and that pane's own overlays are `z-20` layers: under them, only the
+             half hanging over the empty side took a click. `isolate` on the row
+             above keeps that rank inside the row, so the viewer and the dialogs,
+             which are outside it, still cover everything. -->
+        <div class="relative z-30 w-px shrink-0 bg-border">
           <div
             class="absolute inset-y-0 -left-1 -right-1 z-10 cursor-col-resize"
             @pointerdown="startSplitDrag"
