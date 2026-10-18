@@ -277,7 +277,15 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   takes it away, and `Escape` leaves the mode): the cursor stays where it was,
   the pane that asked keeps the keyboard, and the display follows that cursor
   from row to row — so the two panes are a browser and a screen rather than two
-  browsers. What the screen shows is *derived* from the browser's cursor
+  browsers. The listing the pane was showing stays in place and is blurred
+  behind the display — a `filter` on that content (`paneContent`), animated in
+  over the reveal and back out as it is dismissed, so the pane needs no
+  background of its own and the media sits on the folder it came from. That blur
+  belongs to the *mode*, not to whatever is being shown: on a row there is
+  nothing to display for, the display empties but the pane stays blurred and
+  covered — saying so, and how to leave (`Preview mode` / `Esc to exit`) — and
+  coming back to a media file fills it again. The display itself carries no chrome, not even the file's name,
+  so the media is all there is to look at. What the screen shows is *derived* from the browser's cursor
   (`stageTarget` in `App.vue`), not pushed to it, which is what makes navigating
   update it for free; leaving media for an ordinary row empties the screen
   instead of freezing the last picture. `Tab` is claimed while a display is up —
@@ -316,7 +324,15 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   that element away), and dismissing hands it back the same way. Each element is
   created fresh for the hand, so the position is applied as soon as the new one
   knows enough to be moved — and it is held with the clip it belongs to, so it
-  can never be carried onto a different one. With the command line
+  can never be carried onto a different one. A preview that has played itself out
+  hands nothing over: the display is where a clip is *watched*, so it starts that
+  one again rather than sitting on the last frame the thumbnail stopped at. The
+  bar spans the hand-off for the same reason it must not flicker: it reads the
+  display's clock while the display has the clip, the held position while the
+  clip is on its way back to an element that is still at 0:00, and its own
+  element otherwise — the clock is read from `loadeddata` rather than
+  `durationchange` for exactly that reason, since the earlier of the two fires
+  before the hand-back has been applied. With the command line
   empty the arrow keys are a scrubber for what is showing (`seekPreview` steps
   the footer's clip and, when a display is up, the same clip in the other pane, so
   the two cannot drift apart): stepping back into a clip that had played itself

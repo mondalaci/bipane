@@ -35,6 +35,13 @@ const props = defineProps<{
    */
   transferred?: boolean
   displayedClock?: PlaybackClock | null
+  /**
+   * Whether this pane is the display for the other pane's cursor — the mode,
+   * rather than a particular file: its own content stays blurred and its listing
+   * stays covered for as long as the mode is on, even while the cursor is on a
+   * row there is nothing to show for.
+   */
+  displaying?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -267,19 +274,23 @@ function onVideoMetadata(event: Event): void {
  * beginning again reads as a restart rather than as a hand-back.
  */
 function resumeFromDisplay(element: HTMLVideoElement): void {
-  const held = handedBack
+  const held = handedBack.value
   if (held === null || held.key !== previewKeyFor(previewTarget.value)) return
-
-  handedBack = null
 
   const at = Math.min(held.time, element.duration)
   if (!Number.isFinite(at) || !canMoveWithin(element, at)) return
   element.currentTime = at
 }
 
-/** Frames are flowing: the spinner has done its job. */
+/**
+ * Frames are flowing: the spinner has done its job, and the clock is read from
+ * here rather than from `durationchange` — that fires before `loadedmetadata`,
+ * where a clip handed back is moved to where the display had it, so reading it
+ * there would show the 0:00 a fresh element starts at.
+ */
 function onVideoStarted(): void {
   if (previewState.value !== 'failed') previewState.value = 'ready'
+  readVideoClock()
 }
 
 function onVideoError(): void {
@@ -306,6 +317,17 @@ function onImageError(): void {
 }
 
 /**
+ * How far the pane's own content is blurred while a display covers it. Enough
+ * that the listing behind reads as a backdrop rather than as something to read,
+ * with the media on top of it standing out.
+ *
+ * It is a filter on the content itself rather than a `backdrop-filter` on the
+ * display: the content is the thing being blurred, and blurring it directly
+ * leaves the display with nothing of its own to paint underneath.
+ */
+const STAGE_BLUR_PX = 8
+
+/**
  * How long a display takes to grow out of the thumbnail it was asked for, and to
  * shrink back into it. It is a translate *and* a scale of the same element — the
  * media, laid out at its final size, is animated back onto the footer's
@@ -320,6 +342,12 @@ const STAGE_REVEAL_MS = 220
  * dismissed: the media has to still be there to shrink back onto its thumbnail.
  */
 const shownStage = ref<StageRequest | null>(null)
+
+/** The pane's own content — bar, listing, footer — which a display blurs. */
+const paneContent = ref<HTMLElement | null>(null)
+
+/** The blur in flight on the pane's own content, so a change of mode can replace it. */
+let contentBlur: Animation | null = null
 
 /** The stream URL of the media another pane is displaying. */
 const stageVideoUrl = computed(() =>
@@ -358,6 +386,30 @@ let stageDismissal: Animation | null = null
 let stageSound = 0
 
 let stageToken = 0
+
+/**
+ * Blur the pane's own content while this pane is the display, and bring it back
+ * into focus when the mode is left. It is the *mode* that blurs rather than the
+ * media: navigating from a media file to an ordinary one empties the display for
+ * a moment, and the pane should go on looking like the preview it still is.
+ */
+watch(
+  () => props.displaying === true,
+  (displaying) => {
+    const content = paneContent.value
+    if (content === null) return
+
+    const from = getComputedStyle(content).filter
+    contentBlur?.cancel()
+    contentBlur = content.animate(
+      [
+        { filter: from === 'none' ? 'blur(0px)' : from },
+        { filter: displaying ? `blur(${STAGE_BLUR_PX}px)` : 'blur(0px)' }
+      ],
+      { duration: STAGE_REVEAL_MS, easing: displaying ? 'ease-out' : 'ease-in', fill: 'forwards' }
+    )
+  }
+)
 
 /**
  * Display the media another pane asked for. There is no settle here: the user
@@ -507,6 +559,7 @@ function onStageShown(): void {
     ],
     { duration: STAGE_REVEAL_MS, easing: 'ease-out' }
   )
+
 }
 
 /**
@@ -644,6 +697,12 @@ function readVideoClock(): void {
   videoTime.value = clock.time
   videoLength.value = clock.length
 
+  // A position held for a clip coming back from a display has done its job now
+  // that this element has been read — and not before: until it can be read the
+  // element is a fresh one at 0:00, so dropping the held position a moment
+  // earlier would flash the bar back to a stale value on the way.
+  handedBack.value = null
+
   // A clip still being encoded is a live stream, which has no length of its own
   // to report: ask the file, once, for the row the cursor has settled on.
   const target = previewTarget.value
@@ -660,16 +719,24 @@ function readStageClock(): void {
 }
 
 /**
- * The clock the bar is drawn from: this pane's own clip, or the display's while
- * the clip has been transferred to it.
+ * The clock the bar is drawn from, which has to be continuous across the hand-off
+ * in both directions: the display's while it has the clip, the last position the
+ * display was at while the clip is on its way back (the element is fresh and has
+ * not been moved yet), and this pane's own element otherwise.
  */
-const playTime = computed(() => (props.transferred ? (props.displayedClock?.time ?? 0) : videoTime.value))
+const playTime = computed(() => {
+  if (props.transferred) return props.displayedClock?.time ?? videoTime.value
 
-const playLength = computed(() =>
-  props.transferred
-    ? (props.displayedClock?.length ?? clipLength.value)
-    : (videoLength.value ?? clipLength.value)
-)
+  const held = handedBack.value
+  if (held !== null && held.key === previewKeyFor(previewTarget.value)) return held.time
+  return videoTime.value
+})
+
+const playLength = computed(() => {
+  const own = videoLength.value ?? clipLength.value
+  if (!props.transferred) return own
+  return props.displayedClock?.length ?? own
+})
 
 /** How much of the clip the bar has filled. */
 const playProgress = computed(() => {
@@ -696,16 +763,17 @@ const showPlayBar = computed(
  * Where a clip had got to when a display handed it back — held with the clip it
  * belongs to, so it can never be applied to a different one. The footer's own
  * element is created fresh when the clip comes back, and would otherwise start
- * it over from the beginning.
+ * it over from the beginning; until it has been moved, this is also what the bar
+ * shows, so that the strip does not flicker down to 0:00 on the way.
  */
-let handedBack: { key: string; time: number } | null = null
+const handedBack = ref<{ key: string; time: number } | null>(null)
 
 watch(
   () => props.displayedClock,
   (clock) => {
     const key = previewKeyFor(previewTarget.value)
     if (props.transferred !== true || !clock || key === null) return
-    handedBack = { key, time: clock.time }
+    handedBack.value = { key, time: clock.time }
   }
 )
 
@@ -740,7 +808,12 @@ function previewPosition(): { key: string; time: number } | null {
   const element = previewVideo.value
   const key = previewKeyFor(previewTarget.value)
   if (!(element instanceof HTMLVideoElement) || key === null) return null
-  return element.currentTime > 0 ? { key, time: element.currentTime } : null
+
+  // A preview that has played itself out has nothing to hand over: the display
+  // is where the clip is watched, so it starts it again rather than sitting on
+  // the last frame the thumbnail stopped at.
+  if (element.ended || element.currentTime <= 0) return null
+  return { key, time: element.currentTime }
 }
 
 /**
@@ -998,243 +1071,240 @@ function onRenameBlur(): void {
     @mousedown="onPointerDown"
     @contextmenu.prevent
   >
-    <div
-      class="flex h-7 shrink-0 items-center gap-2 border-b border-border-subtle px-3"
-      :class="active ? 'bg-accent text-fg-bright' : 'bg-surface text-fg-dim'"
-    >
-      <span class="truncate font-mono text-ui-sm" :title="controller.state.path">
-        {{ controller.state.path || '—' }}
-      </span>
-      <span
-        v-if="controller.state.loading"
-        class="ml-auto shrink-0 text-ui-sm text-fg-dim"
+    <div ref="paneContent" class="flex min-h-0 grow flex-col">
+      <div
+        class="flex h-7 shrink-0 items-center gap-2 border-b border-border-subtle px-3"
+        :class="active ? 'bg-accent text-fg-bright' : 'bg-surface text-fg-dim'"
       >
-        loading…
-      </span>
-    </div>
-
-    <div
-      class="flex h-6 shrink-0 items-center border-b border-border-subtle bg-bg px-3 text-ui-sm text-fg-dim"
-    >
-      <span class="min-w-0 flex-1">Name</span>
-      <span class="w-16 shrink-0 text-right">Size</span>
-      <span class="w-28 shrink-0 text-right">Modified</span>
-    </div>
-
-    <div
-      v-if="controller.state.searchActive"
-      data-search
-      class="flex h-7 shrink-0 items-center gap-2 border-b border-border-subtle bg-bg-alt px-3"
-    >
-      <svg
-        viewBox="0 0 24 24"
-        class="h-3.5 w-3.5 shrink-0 text-fg-dim"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        aria-hidden="true"
-      >
-        <circle cx="11" cy="11" r="7" />
-        <path d="m20 20-3.6-3.6" />
-      </svg>
-      <input
-        ref="searchInput"
-        type="text"
-        class="min-w-0 flex-1 bg-transparent font-mono text-ui text-fg outline-none placeholder:text-fg-dim"
-        placeholder="incremental search"
-        spellcheck="false"
-        autocomplete="off"
-        :value="controller.state.searchQuery"
-        @input="onSearchInput"
-      />
-      <span
-        v-if="controller.state.searchQuery"
-        class="shrink-0 tabular-nums text-ui-sm text-fg-dim"
-      >
-        {{ controller.state.itemCount }} matches
-      </span>
-    </div>
-
-    <p
-      v-if="notice"
-      class="shrink-0 px-3 py-2 text-ui"
-      :class="notice.error ? 'text-danger' : 'text-fg-dim'"
-    >
-      {{ notice.text }}
-    </p>
-
-    <ul ref="listEl" class="min-h-0 flex-1 overflow-y-auto">
-      <li
-        v-for="(entry, index) in controller.state.entries"
-        :key="entry.path"
-        class="flex cursor-default items-center gap-2 px-3 text-ui"
-        :style="{ height: `${ROW_HEIGHT}px` }"
-        :class="rowClass(index)"
-        @mousedown.right="onRowRightDown(index, $event)"
-        @mouseenter="onRowEnter(index)"
-        @contextmenu.prevent
-        @click="onRowClick(index)"
-        @dblclick="controller.activate()"
-      >
-        <span class="flex w-4 shrink-0 items-center justify-center">
-          <FileIcon :entry="entry" />
+        <span class="truncate font-mono text-ui-sm" :title="controller.state.path">
+          {{ controller.state.path || '—' }}
         </span>
+        <span
+          v-if="controller.state.loading"
+          class="ml-auto shrink-0 text-ui-sm text-fg-dim"
+        >
+          loading…
+        </span>
+      </div>
 
+      <div
+        class="flex h-6 shrink-0 items-center border-b border-border-subtle bg-bg px-3 text-ui-sm text-fg-dim"
+      >
+        <span class="min-w-0 flex-1">Name</span>
+        <span class="w-16 shrink-0 text-right">Size</span>
+        <span class="w-28 shrink-0 text-right">Modified</span>
+      </div>
+
+      <div
+        v-if="controller.state.searchActive"
+        data-search
+        class="flex h-7 shrink-0 items-center gap-2 border-b border-border-subtle bg-bg-alt px-3"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          class="h-3.5 w-3.5 shrink-0 text-fg-dim"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          aria-hidden="true"
+        >
+          <circle cx="11" cy="11" r="7" />
+          <path d="m20 20-3.6-3.6" />
+        </svg>
         <input
-          v-if="controller.state.renaming === entry.path"
-          :ref="setRenameInput"
+          ref="searchInput"
           type="text"
-          class="min-w-0 flex-1 rounded border border-accent-strong bg-bg px-1 font-mono text-ui text-fg outline-none"
-          :value="entry.name"
+          class="min-w-0 flex-1 bg-transparent font-mono text-ui text-fg outline-none placeholder:text-fg-dim"
+          placeholder="incremental search"
           spellcheck="false"
           autocomplete="off"
-          @keydown="onRenameKey"
-          @blur="onRenameBlur"
-          @mousedown.stop
-          @click.stop
-          @dblclick.stop
+          :value="controller.state.searchQuery"
+          @input="onSearchInput"
         />
         <span
-          v-else
-          class="min-w-0 flex-1 truncate"
-          :class="controller.isSelected(entry) ? 'text-selected' : ''"
-          >{{ entry.name }}</span
+          v-if="controller.state.searchQuery"
+          class="shrink-0 tabular-nums text-ui-sm text-fg-dim"
         >
-
-        <span
-          v-if="entry.isSymlink && entry.symlinkTarget"
-          class="max-w-40 shrink-0 truncate font-mono text-ui-sm text-fg-dim"
-          :title="entry.symlinkTarget"
-        >
-          → {{ entry.symlinkTarget }}
+          {{ controller.state.itemCount }} matches
         </span>
-
-        <span
-          class="w-16 shrink-0 text-right tabular-nums"
-          :class="metaClass(index)"
-        >
-          {{ entry.kind === 'directory' ? '' : formatSize(entry.size) }}
-        </span>
-        <span class="w-28 shrink-0 text-right tabular-nums" :class="metaClass(index)">
-          {{ entry.isParent ? '' : formatDate(entry.mtimeMs) }}
-        </span>
-      </li>
-    </ul>
-
-    <div
-      class="flex shrink-0 items-center justify-between gap-3 border-t border-border-subtle bg-surface px-3 text-ui-sm text-fg-dim"
-      :class="footerTall ? 'py-1' : 'h-6'"
-    >
-      <div class="flex min-w-0 items-center gap-3">
-        <!-- Shown/hidden with `v-show`, not `v-if`: a video hidden this way is
-             still mounted, which is what lets it fetch its metadata, and so its
-             shape, before the box is allowed on screen. -->
-        <div
-          v-show="previewVisible"
-          ref="previewEl"
-          :style="previewBoxStyle"
-          class="relative flex shrink-0 items-center justify-center overflow-hidden rounded border border-border-subtle bg-bg"
-        >
-          <img
-            v-if="showImage"
-            :src="frame ?? undefined"
-            alt=""
-            draggable="false"
-            class="h-full w-full object-contain"
-            @load="onImageLoad"
-            @error="onImageError"
-          />
-          <!-- Muted and played once, never looped: a preview is a look at the
-               clip, not a viewing session, and a looping 4K file would decode
-               for as long as the cursor happens to rest on the row. -->
-          <video
-            v-else-if="showVideo && !transferred"
-            ref="previewVideo"
-            :src="videoUrl ?? undefined"
-            muted
-            autoplay
-            preload="metadata"
-            class="h-full w-full object-contain"
-            @loadedmetadata="onVideoMetadata"
-            @loadeddata="onVideoStarted"
-            @playing="onVideoStarted"
-            @timeupdate="readVideoClock"
-            @durationchange="readVideoClock"
-            @seeked="readVideoClock"
-            @ended="readVideoClock"
-            @error="onVideoError"
-          ></video>
-          <span
-            v-if="showSpinner"
-            class="absolute h-3.5 w-3.5 animate-spin rounded-full border border-fg border-t-transparent"
-          />
-        </div>
-
-        <!-- The space the box will take, before its shape is known. Held at the
-             box's own height so the footer is already the size it will be. -->
-        <span v-if="previewWaiting" class="flex h-16 shrink-0 items-center">
-          <span
-            class="h-3.5 w-3.5 animate-spin rounded-full border border-fg border-t-transparent"
-          />
-        </span>
-
-        <!-- Where the clip has got to: its position, a bar for how far that is
-             through it, and its length — the last two only when the clip is a
-             whole file whose length is really known. -->
-        <span
-          v-if="showPlayBar"
-          class="flex shrink-0 items-center gap-2 tabular-nums text-ui-sm text-fg-dim"
-        >
-          <span>{{ formatDuration(playTime) }}</span>
-          <span
-            v-if="playLength !== null"
-            class="h-1 w-20 overflow-hidden rounded-full bg-border"
-          >
-            <span
-              class="block h-full rounded-full bg-accent-strong"
-              :style="{ width: playProgress }"
-            />
-          </span>
-          <span v-if="playLength !== null">{{ formatDuration(playLength) }}</span>
-        </span>
-
-        <span class="shrink-0 tabular-nums">{{ controller.state.itemCount }} items</span>
       </div>
 
-      <div class="flex shrink-0 items-center gap-3">
-        <template v-if="entry && !entry.isParent">
-          <span class="hidden tabular-nums lg:inline">{{ formatMode(entry.mode) }}</span>
-          <span class="tabular-nums">
-            {{ entry.kind === 'directory' ? 'dir' : formatSize(entry.size) }}
-          </span>
-          <span class="hidden tabular-nums lg:inline">{{ formatDate(entry.mtimeMs) }}</span>
-        </template>
+      <p
+        v-if="notice"
+        class="shrink-0 px-3 py-2 text-ui"
+        :class="notice.error ? 'text-danger' : 'text-fg-dim'"
+      >
+        {{ notice.text }}
+      </p>
 
-        <span v-if="selectedCount > 0" class="tabular-nums text-selected">
-          {{ selectedCount }} selected
-        </span>
+      <ul ref="listEl" class="min-h-0 flex-1 overflow-y-auto">
+        <li
+          v-for="(entry, index) in controller.state.entries"
+          :key="entry.path"
+          class="flex cursor-default items-center gap-2 px-3 text-ui"
+          :style="{ height: `${ROW_HEIGHT}px` }"
+          :class="rowClass(index)"
+          @mousedown.right="onRowRightDown(index, $event)"
+          @mouseenter="onRowEnter(index)"
+          @contextmenu.prevent
+          @click="onRowClick(index)"
+          @dblclick="controller.activate()"
+        >
+          <span class="flex w-4 shrink-0 items-center justify-center">
+            <FileIcon :entry="entry" />
+          </span>
+
+          <input
+            v-if="controller.state.renaming === entry.path"
+            :ref="setRenameInput"
+            type="text"
+            class="min-w-0 flex-1 rounded border border-accent-strong bg-bg px-1 font-mono text-ui text-fg outline-none"
+            :value="entry.name"
+            spellcheck="false"
+            autocomplete="off"
+            @keydown="onRenameKey"
+            @blur="onRenameBlur"
+            @mousedown.stop
+            @click.stop
+            @dblclick.stop
+          />
+          <span
+            v-else
+            class="min-w-0 flex-1 truncate"
+            :class="controller.isSelected(entry) ? 'text-selected' : ''"
+            >{{ entry.name }}</span
+          >
+
+          <span
+            v-if="entry.isSymlink && entry.symlinkTarget"
+            class="max-w-40 shrink-0 truncate font-mono text-ui-sm text-fg-dim"
+            :title="entry.symlinkTarget"
+          >
+            → {{ entry.symlinkTarget }}
+          </span>
+
+          <span
+            class="w-16 shrink-0 text-right tabular-nums"
+            :class="metaClass(index)"
+          >
+            {{ entry.kind === 'directory' ? '' : formatSize(entry.size) }}
+          </span>
+          <span class="w-28 shrink-0 text-right tabular-nums" :class="metaClass(index)">
+            {{ entry.isParent ? '' : formatDate(entry.mtimeMs) }}
+          </span>
+        </li>
+      </ul>
+
+      <div
+        class="flex shrink-0 items-center justify-between gap-3 border-t border-border-subtle bg-surface px-3 text-ui-sm text-fg-dim"
+        :class="footerTall ? 'py-1' : 'h-6'"
+      >
+        <div class="flex min-w-0 items-center gap-3">
+          <!-- Shown/hidden with `v-show`, not `v-if`: a video hidden this way is
+               still mounted, which is what lets it fetch its metadata, and so its
+               shape, before the box is allowed on screen. -->
+          <div
+            v-show="previewVisible"
+            ref="previewEl"
+            :style="previewBoxStyle"
+            class="relative flex shrink-0 items-center justify-center overflow-hidden rounded border border-border-subtle bg-bg"
+          >
+            <img
+              v-if="showImage"
+              :src="frame ?? undefined"
+              alt=""
+              draggable="false"
+              class="h-full w-full object-contain"
+              @load="onImageLoad"
+              @error="onImageError"
+            />
+            <!-- Muted and played once, never looped: a preview is a look at the
+                 clip, not a viewing session, and a looping 4K file would decode
+                 for as long as the cursor happens to rest on the row. -->
+            <video
+              v-else-if="showVideo && !transferred"
+              ref="previewVideo"
+              :src="videoUrl ?? undefined"
+              muted
+              autoplay
+              preload="metadata"
+              class="h-full w-full object-contain"
+              @loadedmetadata="onVideoMetadata"
+              @loadeddata="onVideoStarted"
+              @playing="onVideoStarted"
+              @timeupdate="readVideoClock"
+              @seeked="readVideoClock"
+              @ended="readVideoClock"
+              @error="onVideoError"
+            ></video>
+            <span
+              v-if="showSpinner"
+              class="absolute h-3.5 w-3.5 animate-spin rounded-full border border-fg border-t-transparent"
+            />
+          </div>
+
+          <!-- The space the box will take, before its shape is known. Held at the
+               box's own height so the footer is already the size it will be. -->
+          <span v-if="previewWaiting" class="flex h-16 shrink-0 items-center">
+            <span
+              class="h-3.5 w-3.5 animate-spin rounded-full border border-fg border-t-transparent"
+            />
+          </span>
+
+          <!-- Where the clip has got to: its position, a bar for how far that is
+               through it, and its length — the last two only when the clip is a
+               whole file whose length is really known. -->
+          <span
+            v-if="showPlayBar"
+            class="flex shrink-0 items-center gap-2 tabular-nums text-ui-sm text-fg-dim"
+          >
+            <span>{{ formatDuration(playTime) }}</span>
+            <span
+              v-if="playLength !== null"
+              class="h-1 w-20 overflow-hidden rounded-full bg-border"
+            >
+              <span
+                class="block h-full rounded-full bg-accent-strong"
+                :style="{ width: playProgress }"
+              />
+            </span>
+            <span v-if="playLength !== null">{{ formatDuration(playLength) }}</span>
+          </span>
+
+          <span class="shrink-0 tabular-nums">{{ controller.state.itemCount }} items</span>
+        </div>
+
+        <div class="flex shrink-0 items-center gap-3">
+          <template v-if="entry && !entry.isParent">
+            <span class="hidden tabular-nums lg:inline">{{ formatMode(entry.mode) }}</span>
+            <span class="tabular-nums">
+              {{ entry.kind === 'directory' ? 'dir' : formatSize(entry.size) }}
+            </span>
+            <span class="hidden tabular-nums lg:inline">{{ formatDate(entry.mtimeMs) }}</span>
+          </template>
+
+          <span v-if="selectedCount > 0" class="tabular-nums text-selected">
+            {{ selectedCount }} selected
+          </span>
+        </div>
       </div>
     </div>
 
-    <!-- What the pane being navigated has asked this one to display. It covers
-         the listing outright rather than sitting beside it, so this pane has one
-         thing on screen: the media. Pointer events stop here so a click cannot
-         move the cursor's pane away from the one being navigated. -->
+    <!-- What the pane being navigated has asked this one to display. The listing
+         stays where it was and is blurred behind it — `paneContent` above takes
+         the blur — so this pane has one thing to look at while the folder it was
+         showing is still there. No chrome of its own: the media is the display.
+         Pointer events stop here so a click cannot move the cursor's pane away
+         from the one being navigated. -->
     <div
-      v-if="shownStage"
-      class="absolute inset-0 z-20 flex flex-col bg-bg"
+      v-if="displaying || shownStage"
+      class="absolute inset-0 z-20 flex flex-col"
       @mousedown.stop
       @click.stop
       @dblclick.stop
     >
-      <div
-        class="flex h-7 shrink-0 items-center border-b border-border-subtle bg-surface px-3 text-ui-sm text-fg-dim"
-      >
-        <span class="min-w-0 truncate">{{ shownStage?.target.name }}</span>
-      </div>
-
-      <div class="relative flex min-h-0 grow items-center justify-center p-3">
+      <div v-if="shownStage" class="relative flex min-h-0 grow items-center justify-center p-3">
         <img
           v-if="showStageImage"
           ref="stageMedia"
@@ -1262,7 +1332,6 @@ function onRenameBlur(): void {
           @loadedmetadata="resumeStage"
           @loadeddata="onStageShown"
           @timeupdate="readStageClock"
-          @durationchange="readStageClock"
           @seeked="readStageClock"
           @ended="readStageClock"
           @error="onStageError"
@@ -1271,6 +1340,16 @@ function onRenameBlur(): void {
           v-if="stageState === 'loading'"
           class="absolute h-5 w-5 animate-spin rounded-full border-2 border-fg border-t-transparent"
         />
+      </div>
+
+      <!-- The row the cursor is on has nothing to show: what this pane is, and
+           how to leave it — an empty blurred pane should not read as a fault. -->
+      <div
+        v-else
+        class="flex min-h-0 grow flex-col items-center justify-center gap-1 p-3 text-center"
+      >
+        <span class="text-ui text-fg">Preview mode</span>
+        <span class="text-ui-sm text-fg-dim">Esc to exit</span>
       </div>
     </div>
   </section>
