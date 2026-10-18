@@ -247,7 +247,16 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   scheme (`src/main/media.ts`) and the footer mounts a `<video>` on it. The
   element is muted (a preview never makes a sound) and plays once rather than
   looping: a looping 4K clip decodes for as long as the cursor happens to rest
-  on the row, measured at over half a core. The scheme is declared before the
+  on the row, measured at over half a core. Its box shows a spinner for as long
+  as the box is up without a frame in it — which for a clip main has to encode
+  before any of it can play is the whole of that wait. Beside the thumbnail the
+  footer shows where the clip is: its position, a bar for how far through it that
+  is, and its length, drawn against what the element reports for itself once the
+  clip is a whole file, and against `fs:video-duration` until then — a clip still
+  being encoded is a live stream, which has no length to report, so ffprobe is
+  asked for the file's own (capped at what an encode covers, since that is what
+  the bar steps through). The bar is absent while there is neither a length to
+  show nor a position yet. The scheme is declared before the
   app is ready, `media-src` carries it in the CSP, and only previewable
   extensions are served, so it cannot become a reader for anything the bar would
   not have offered anyway. A `.mov` is served as `video/mp4`: Chromium plays the

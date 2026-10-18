@@ -1,5 +1,19 @@
 const SIZE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
 
+/**
+ * A clip's position or length, as `m:ss` — or `h:mm:ss` once it runs past the
+ * hour, which a camcorder tape's files do.
+ */
+export function formatDuration(seconds: number): string {
+  const total = Math.max(0, Math.floor(seconds))
+  const minutes = Math.floor(total / 60)
+  const rest = total % 60
+  const pad = (value: number): string => String(value).padStart(2, '0')
+
+  if (minutes < 60) return `${minutes}:${pad(rest)}`
+  return `${Math.floor(minutes / 60)}:${pad(minutes % 60)}:${pad(rest)}`
+}
+
 export function formatSize(bytes: number): string {
   if (bytes < 0) return ''
   if (bytes < 1024) return `${bytes} B`

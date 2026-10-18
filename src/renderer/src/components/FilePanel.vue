@@ -2,10 +2,10 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ComponentPublicInstance } from 'vue'
 import type { PaneController, ScrollAlign } from '@renderer/composables/useDirectory'
-import { formatDate, formatMode, formatSize } from '@renderer/lib/format'
+import { formatDate, formatDuration, formatMode, formatSize } from '@renderer/lib/format'
 import { previewKeyFor, previewTargetFor, type StageRequest } from '@renderer/lib/preview'
 import FileIcon from '@renderer/components/FileIcon.vue'
-import { MEDIA_SCHEME } from '@shared/video'
+import { MEDIA_SCHEME, needsTranscode } from '@shared/video'
 import type { PixelSize } from '@shared/types'
 
 const ROW_HEIGHT = 22
@@ -191,6 +191,10 @@ watch(
     cancelPreviewRead()
     const token = (previewToken += 1)
     frame.value = null
+    videoTime.value = 0
+    videoLength.value = null
+    clipLength.value = null
+    clipLengthKey = null
 
     const target = previewTarget.value
     if (key === null || !target) {
@@ -376,6 +380,74 @@ const previewEl = ref<HTMLElement | null>(null)
 
 /** The footer's own clip, while one is playing there. */
 const previewVideo = ref<HTMLVideoElement | null>(null)
+
+/** Where the footer's clip has got to, and how long it is once that is knowable. */
+const videoTime = ref(0)
+const videoLength = ref<number | null>(null)
+
+/**
+ * The length of a clip main has to encode, asked of the file: while it is being
+ * encoded the element has only a live stream, which cannot report one.
+ */
+const clipLength = ref<number | null>(null)
+let clipLengthKey: string | null = null
+
+/**
+ * Follow the footer's clip for the play bar beside its thumbnail: the position
+ * always, and the length only once the clip is a whole file that can be measured
+ * and moved within. A clip main is still encoding arrives as a live stream, whose
+ * "length" is a growing estimate of what has been encoded so far — a bar drawn
+ * from that would misstate a three-minute file as a four-second one.
+ */
+function readVideoClock(): void {
+  const element = previewVideo.value
+  if (!(element instanceof HTMLVideoElement)) return
+
+  videoTime.value = element.currentTime
+
+  const ranges = element.seekable
+  const measured =
+    Number.isFinite(element.duration) && ranges.length > 0 && ranges.end(ranges.length - 1) > 0
+  videoLength.value = measured ? element.duration : null
+  if (measured) return
+
+  // A clip still being encoded is a live stream, which has no length of its own
+  // to report: ask the file, once, for the row the cursor has settled on.
+  const target = previewTarget.value
+  if (!target || !needsTranscode(target.name)) return
+
+  const key = previewKeyFor(target)
+  if (key === null || key === clipLengthKey) return
+  clipLengthKey = key
+  void window.bipane.fs.videoDuration(target.path).then((seconds) => {
+    if (clipLengthKey !== key) return
+    clipLength.value = seconds
+  })
+}
+
+/** The length the bar is drawn against: what the element can report, or the file's own. */
+const playLength = computed(() => videoLength.value ?? clipLength.value)
+
+/** How much of the clip the bar has filled. */
+const playProgress = computed(() => {
+  const length = playLength.value
+  if (length === null || length <= 0) return '0%'
+  const ratio = Math.min(Math.max(videoTime.value / length, 0), 1)
+  return `${(ratio * 100).toFixed(2)}%`
+})
+
+/**
+ * Whether the play bar belongs in the footer at all. Not while a clip is still
+ * being encoded and nothing has played yet: there is no length to show and no
+ * position to show, and a dead `0:00` beside a spinner says less than the
+ * spinner alone.
+ */
+const showPlayBar = computed(
+  () =>
+    previewTarget.value?.kind === 'video' &&
+    showVideo.value &&
+    (playLength.value !== null || videoTime.value > 0)
+)
 
 function previewRect(): DOMRect | null {
   const element = previewEl.value
@@ -794,6 +866,10 @@ function onRenameBlur(): void {
             @loadedmetadata="onVideoMetadata"
             @loadeddata="onVideoStarted"
             @playing="onVideoStarted"
+            @timeupdate="readVideoClock"
+            @durationchange="readVideoClock"
+            @seeked="readVideoClock"
+            @ended="readVideoClock"
             @error="onVideoError"
           ></video>
           <span
@@ -808,6 +884,26 @@ function onRenameBlur(): void {
           <span
             class="h-3.5 w-3.5 animate-spin rounded-full border border-fg border-t-transparent"
           />
+        </span>
+
+        <!-- Where the clip has got to: its position, a bar for how far that is
+             through it, and its length — the last two only when the clip is a
+             whole file whose length is really known. -->
+        <span
+          v-if="showPlayBar"
+          class="flex shrink-0 items-center gap-2 tabular-nums text-ui-sm text-fg-dim"
+        >
+          <span>{{ formatDuration(videoTime) }}</span>
+          <span
+            v-if="playLength !== null"
+            class="h-1 w-20 overflow-hidden rounded-full bg-border"
+          >
+            <span
+              class="block h-full rounded-full bg-accent-strong"
+              :style="{ width: playProgress }"
+            />
+          </span>
+          <span v-if="playLength !== null">{{ formatDuration(playLength) }}</span>
         </span>
 
         <span class="shrink-0 tabular-nums">{{ controller.state.itemCount }} items</span>

@@ -20,6 +20,9 @@ interface ByteRange {
  */
 const FFMPEG = process.env['BIPANE_FFMPEG'] ?? 'ffmpeg'
 
+/** Where ffprobe is looked for, which is what can say how long a clip is. */
+const FFPROBE = process.env['BIPANE_FFPROBE'] ?? 'ffprobe'
+
 /**
  * How much of a clip a transcode covers, and how wide its output may be. Both
  * are what keep the work proportionate to a *preview*: the clip is stepping
@@ -424,6 +427,7 @@ export function killAllTranscodes(): void {
   children.clear()
   transcodes.clear()
   running.clear()
+  durations.clear()
   if (transcodeDir !== null) {
     try {
       rmSync(transcodeDir, { recursive: true, force: true })
@@ -434,12 +438,80 @@ export function killAllTranscodes(): void {
   }
 }
 
+/** How long a preview of each file is, by the identity of the file. */
+const durations = new Map<string, number | null>()
+
+/**
+ * How long the clip a preview will play is: the file's own length, or as much of
+ * it as the encode covers (the bar steps through what is played, not what is on
+ * disk), read by ffprobe rather than off the element — a clip that is still being
+ * encoded arrives as a live stream, and a stream has no length to report until
+ * it is over. Null when nothing can say.
+ */
+async function videoDuration(target: string): Promise<number | null> {
+  let stats: Stats
+  try {
+    stats = await fs.stat(target)
+    if (!stats.isFile()) return null
+  } catch {
+    return null
+  }
+
+  const key = transcodeKey(target, stats)
+  const known = durations.get(key)
+  if (known !== undefined) return known
+
+  const child = spawn(
+    FFPROBE,
+    ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=nw=1:nk=1', target],
+    { stdio: ['ignore', 'pipe', 'ignore'] }
+  )
+  children.add(child)
+
+  let printed = ''
+  child.stdout?.on('data', (chunk: Buffer) => {
+    printed = (printed + chunk.toString()).slice(-64)
+  })
+
+  const code = await new Promise<number | null>((resolve) => {
+    const timer = setTimeout(() => child.kill('SIGKILL'), 10_000)
+    child.once('error', () => {
+      clearTimeout(timer)
+      resolve(null)
+    })
+    child.once('close', (status) => {
+      clearTimeout(timer)
+      resolve(status)
+    })
+  })
+  children.delete(child)
+
+  const seconds = Number.parseFloat(printed.trim())
+  const length =
+    code === 0 && Number.isFinite(seconds) && seconds > 0
+      ? Math.min(seconds, TRANSCODE_SECONDS)
+      : null
+
+  durations.set(key, length)
+  return length
+}
+
 /**
  * Answer whether this build can transcode, which is what decides whether a
- * container Chromium has nothing for is previewable at all.
+ * container Chromium has nothing for is previewable at all — and, since only
+ * such a clip needs its length read for it, what it can say about durations.
  */
 export function registerMediaHandlers(): void {
   ipcMain.handle('fs:can-transcode', () => ffmpegAvailable())
+  ipcMain.handle('fs:video-duration', async (_event, target: string): Promise<number | null> => {
+    if (typeof target !== 'string' || target.length === 0) return null
+    if (!(await ffmpegAvailable())) return null
+    try {
+      return await videoDuration(target)
+    } catch {
+      return null
+    }
+  })
 }
 
 /**

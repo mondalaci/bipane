@@ -42,6 +42,13 @@ export interface BipaneFsApi {
    */
   canTranscode(): Promise<boolean>
   /**
+   * How long the clip a preview of this file would play is — its own length, or
+   * as much of it as an encode covers — or null when nothing can say. Only a
+   * clip Chromium cannot play itself needs this: the element reports its own
+   * length as soon as it has one.
+   */
+  videoDuration(target: string): Promise<number | null>
+  /**
    * Overwrite a regular text file with edited content (the editor's save).
    * Returns the resolved path that was written.
    */
