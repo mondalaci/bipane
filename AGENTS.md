@@ -437,6 +437,22 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   is showing without leaving the mode, and a wheel turned with a button held is
   part of that press's gesture here too, so its release neither leaves the mode
   nor counts as a click.
+- **An action on a clip is answered by a YouTube-style on-screen display.** A
+  pause, a resume or a seek flashes a glyph over the picture that holds for a
+  moment and fades on its own (`PlaybackOsd.vue`, `styles/osd.css`) — nothing is
+  permanently drawn over the video, and a repeat of the action restarts the
+  flash rather than being swallowed. It is a play/pause glyph in the middle, or
+  a direction chevron with how far the clip was stepped on the side it is moving
+  toward — seconds as `10`, and a coarser step as `1m`/`10m` (`formatSeekStep`),
+  at the size of the box it is over: the enlarged display's, or — when
+  no display is up, so the footer's own preview is the thing being driven — the
+  small thumbnail's, compact. The overlay owns only the *animation*: it reports
+  the end of the flash back with a `done` event, so no timer has to be kept in
+  step with the CSS, and it never takes a click (`pointer-events-none`). The
+  footer and the display keep one display each, since the two can be showing
+  different clips. A seek is flashed in `seek()` itself, so the keyboard, the
+  wheel and the coarser Ctrl steps read the same, while a drag of the transport
+  does not — that is a scrub with the bar under the pointer rather than a step.
 - **The full-screen mode is the display, presented over the whole window.** It is
   not a third thing to maintain: `Ctrl+Enter` (and a triple-click on a media
   file's name, which is the same gesture with the mouse) opens the display the

@@ -76,6 +76,19 @@ export interface PlaybackClock {
 }
 
 /**
+ * One flash of the on-screen display over a clip — YouTube's feedback for an
+ * action on it: a glyph on a pause or a resume, and how far it was stepped on a
+ * seek. Its `id` identifies the flash, so repeating an action is a new element
+ * that restarts the animation rather than an unchanged one that shows nothing.
+ */
+export interface OsdFlash {
+  kind: 'play' | 'pause' | 'seek'
+  /** Seconds stepped: negative back, positive forward. A seek only. */
+  delta: number
+  id: number
+}
+
+/**
  * What one pane asks another to display: the media under *its* cursor, plus how
  * to find the thumbnail that media is already shown as — the box the display
  * grows out of. `animation` changes only when a display should be revealed with

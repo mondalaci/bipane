@@ -6,11 +6,13 @@ import { formatDate, formatDuration, formatMode, formatSize } from '@renderer/li
 import {
   previewKeyFor,
   previewTargetFor,
+  type OsdFlash,
   type PlaybackClock,
   type PreviewTarget,
   type StageRequest
 } from '@renderer/lib/preview'
 import FileIcon from '@renderer/components/FileIcon.vue'
+import PlaybackOsd from '@renderer/components/PlaybackOsd.vue'
 import { MEDIA_SCHEME, needsTranscode } from '@shared/video'
 import type { PixelSize } from '@shared/types'
 
@@ -978,11 +980,41 @@ function onStageMediaDblclick(event: MouseEvent): void {
   emit('toggle-fullscreen')
 }
 
+/**
+ * The YouTube-style on-screen display: a glyph flashed over the picture on a
+ * pause, a resume or a seek, which the overlay fades on its own and reports back
+ * with `done`. The footer thumbnail and the enlarged display keep one each —
+ * the two can be showing different clips, and either can be the one driven.
+ */
+const footerOsd = ref<OsdFlash | null>(null)
+const stageOsd = ref<OsdFlash | null>(null)
+
+/** Identity of one flash, so a repeat of an action is a new element that animates. */
+let osdSeq = 0
+
+/**
+ * Flash the display over whichever clip an action was on: the enlarged pane's,
+ * or this pane's footer thumbnail. `delta` is a seek's step in seconds, positive
+ * forward. Nothing is flashed for an action on an image, which has none of this.
+ */
+function flashOsd(
+  element: HTMLVideoElement | HTMLImageElement | null,
+  kind: OsdFlash['kind'],
+  delta = 0
+): void {
+  if (!(element instanceof HTMLVideoElement)) return
+  const flash: OsdFlash = { kind, delta, id: ++osdSeq }
+  if (element === stageMedia.value) stageOsd.value = flash
+  else footerOsd.value = flash
+}
+
 /** Pause or resume one video, answering whether there was one to toggle. */
 function togglePlayback(element: HTMLImageElement | HTMLVideoElement | null): boolean {
   if (!(element instanceof HTMLVideoElement)) return false
-  if (element.paused) void element.play().catch(() => {})
+  const resuming = element.paused
+  if (resuming) void element.play().catch(() => {})
   else element.pause()
+  flashOsd(element, resuming ? 'play' : 'pause')
   return true
 }
 
@@ -1293,6 +1325,8 @@ function seek(element: HTMLVideoElement | HTMLImageElement | null, delta: number
 
   const duration = element.duration
   if (!Number.isFinite(duration) || duration <= 0) return
+
+  flashOsd(element, 'seek', delta)
 
   // Reading `ended` has to happen before the seek: moving the playhead anywhere
   // but the end is what clears it.
@@ -2165,6 +2199,14 @@ function onRenameBlur(): void {
               @ended="readVideoClock"
               @error="onVideoError"
             ></video>
+            <!-- The play/pause or seek feedback for this thumbnail's own clip. -->
+            <PlaybackOsd
+              v-if="footerOsd"
+              :key="footerOsd.id"
+              :osd="footerOsd"
+              compact
+              @done="footerOsd = null"
+            />
             <span
               v-if="showSpinner"
               class="absolute h-3.5 w-3.5 animate-spin rounded-full border border-fg border-t-transparent"
@@ -2352,6 +2394,15 @@ function onRenameBlur(): void {
             @load="onStageShown"
             @dblclick="onStageMediaDblclick"
             @error="onStageError"
+          />
+
+          <!-- The play/pause or seek feedback for the clip being displayed —
+               over the picture, and never a click of its own. -->
+          <PlaybackOsd
+            v-if="stageOsd"
+            :key="stageOsd.id"
+            :osd="stageOsd"
+            @done="stageOsd = null"
           />
 
           <span

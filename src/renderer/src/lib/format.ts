@@ -14,6 +14,15 @@ export function formatDuration(seconds: number): string {
   return `${Math.floor(minutes / 60)}:${pad(minutes % 60)}:${pad(rest)}`
 }
 
+/**
+ * How far a clip was stepped, for the seek flash: whole minutes as `1m`/`10m` —
+ * the coarser keys step by those — and seconds otherwise.
+ */
+export function formatSeekStep(seconds: number): string {
+  const total = Math.abs(seconds)
+  return total >= 60 && total % 60 === 0 ? `${total / 60}m` : `${total}`
+}
+
 export function formatSize(bytes: number): string {
   if (bytes < 0) return ''
   if (bytes < 1024) return `${bytes} B`

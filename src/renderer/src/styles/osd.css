@@ -1,0 +1,33 @@
+/*
+ * The transient feedback an action on a clip gets — YouTube's idiom: a glyph
+ * over the picture on a pause, a resume or a seek, which holds for a moment and
+ * fades on its own. The animation is the whole of the flash's life: the element
+ * is removed when it ends (see PlaybackOsd), so no timer has to be kept in step
+ * with it, and repeating an action restarts it because a new flash is a new
+ * element. The timing is per segment: a quick pop in, a hold, then a fade.
+ */
+.osd-pop {
+  animation: osd-pop 700ms both;
+}
+
+@keyframes osd-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.6);
+    animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  15% {
+    opacity: 1;
+    transform: scale(1);
+    animation-timing-function: linear;
+  }
+  72% {
+    opacity: 1;
+    transform: scale(1);
+    animation-timing-function: ease-in;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
