@@ -100,7 +100,10 @@ display's, or the footer preview if none is up — and stays the shell's own spa
 when there is no clip to toggle), `Enter` descends or opens with the system default app — except on an image or a
 video, which it displays in the other pane instead (see below) — and a
 double-click on a row is the same thing with the mouse (`activate` →
-`activateRow`), `F3` opens a regular file
+`activateRow`), `Ctrl+Enter` opens that same media as a full-screen display over
+the whole window (a triple-click on the file's name is the mouse's half of the
+gesture; pressed again it gives the window back, and `Escape` leaves the mode),
+`F3` opens a regular file
 read-only in the Monaco viewer, `F4` opens it for editing with Ctrl+S to save (a
 directory still descends on `F3`), `Insert` marks the current entry and moves down,
 right-click marks a row and dragging the held button paints that mark across
@@ -336,7 +339,11 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   seek target, so it is grabbable with the mouse: clicking or dragging scrubs
   the clip (a clip main must encode is re-asked from the dropped position,
   rather than re-encoding per pixel). A left click on the picture itself pauses
-  or resumes it, as does `Space` while the command line is empty. What the
+  or resumes it, as does `Space` while the command line is empty, while a double
+  left-click on the enlarged media — a clip or a still, the same gesture on either
+  — trades the pane and the whole window: the mouse's half of the `Ctrl+Enter`
+  full-screen toggle, where a clip's own pair of play/pause clicks cancel out.
+  What the
   screen shows is *derived* from the browser's cursor
   (`stageTarget` in `App.vue`), not pushed to it, which is what makes navigating
   update it for free; leaving media for an ordinary row empties the screen
@@ -430,6 +437,24 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   is showing without leaving the mode, and a wheel turned with a button held is
   part of that press's gesture here too, so its release neither leaves the mode
   nor counts as a click.
+- **The full-screen mode is the display, presented over the whole window.** It is
+  not a third thing to maintain: `Ctrl+Enter` (and a triple-click on a media
+  file's name, which is the same gesture with the mouse) opens the display the
+  arrow keys already drive and asks the pane showing it to lay it out over
+  everything instead of in its pane (`stageFullscreen` in `App.vue`, broadcast to
+  both panes; the overlay in `FilePanel` becomes `fixed inset-0 z-50` — the pane
+  row is `isolate` and its parent is positioned, so the fixed layer paints over
+  the tab strip and the terminal without anything being teleported or hidden).
+  Everything else is untouched: the pane that asked keeps the keyboard, so
+  arrowing still browses the folder and the media follows the cursor; seek,
+  play/pause, the wheel, the transport and the sound ramp are the same code. The
+  reveal still grows out of the footer thumbnail — the source pane is behind the
+  overlay, not unmounted, so its footer is still measurable — and the reverse
+  still shrinks back onto it. That is why leaving the mode holds the full-window
+  layout until the dismissal has landed (`fullscreenPresentation` latches past
+  the `fullscreen` prop, which `Ctrl+Enter`-back-to-the-pane clears at once but
+  Escape does not): snapping the overlay back to its pane under the shrinking
+  picture would resize the media out from under its own animation.
 - **A clip Chromium cannot play is transcoded, when ffmpeg is there to do it.**
   Chromium has no demuxer for AVI or ASF, and no decoder for the motion JPEG of
   an old camcorder AVI or the WMV3/VC-1 of an ASF one — `canPlayType` answers no

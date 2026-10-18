@@ -97,6 +97,16 @@ const moveJob = ref<{ entries: PaneEntry[]; destination: string } | null>(null)
  */
 const stageSide = ref<PanelSide | null>(null)
 
+/**
+ * Whether the display fills the whole window rather than the pane it belongs to
+ * — the full-screen viewing mode, which Ctrl+Enter and a triple-click on a
+ * media file's name open. It is the *same* display, presented over everything
+ * (the tab strip, both panes and the terminal) instead of in one pane: the pane
+ * that asked goes on driving it, so the arrow keys still browse the folder and
+ * the media follows the cursor as before.
+ */
+const stageFullscreen = ref(false)
+
 /** The pane being navigated while a display is up: always the one that asked for it. */
 const stageSource = computed<PanelSide | null>(() =>
   stageSide.value === null ? null : stageSide.value === 'left' ? 'right' : 'left'
@@ -242,8 +252,58 @@ function showStage(side: PanelSide): void {
 
 function exitStage(): void {
   stageSide.value = null
+  stageFullscreen.value = false
   displayedClock.value = null
   stageResume.value = null
+}
+
+/**
+ * Ctrl+Enter: the full-screen viewing mode. With no display up it starts one on
+ * the row under the cursor and opens it over the whole window; with a display
+ * already up — in a pane, or full screen — it toggles the presentation, so
+ * Enter and then Ctrl+Enter is the natural "bigger". Escape (and a right-click
+ * on the display) still leaves the mode outright.
+ *
+ * Nothing happens on a row there is nothing to show for while no display is up:
+ * the gesture belongs to media, and an ordinary file or a directory is not one
+ * to fill a screen with.
+ */
+function toggleFullscreen(side: PanelSide): void {
+  if (stageSide.value === null) {
+    const pane = side === 'left' ? left.value : right.value
+    if (previewTargetFor(pane.current()) === null) return
+    showStage(side)
+  }
+
+  stageFullscreen.value = !stageFullscreen.value
+}
+
+/**
+ * A triple-click on a media file's name: like Ctrl+Enter, but always *into* the
+ * full-screen mode rather than a toggle — the mouse gesture means "view this
+ * big", so a display that is already up is enlarged rather than shrunk. The
+ * double-click that came before it has already asked for the pane display, so
+ * this only ever confirms the last step of the escalation.
+ */
+function openFullscreen(side: PanelSide): void {
+  if (stageSide.value === null) {
+    const pane = side === 'left' ? left.value : right.value
+    if (previewTargetFor(pane.current()) === null) return
+    showStage(side)
+  }
+
+  stageFullscreen.value = true
+}
+
+/**
+ * A double left-click on the video being displayed: the same switch Ctrl+Enter
+ * makes, but made on the picture itself — the pane and the whole window trade
+ * places. It only ever arrives from a display that is already up, so there is
+ * nothing to start; a double-click is not a way into the mode.
+ */
+function toggleDisplayFullscreen(): void {
+  if (stageSide.value === null) return
+  stageFullscreen.value = !stageFullscreen.value
 }
 
 /**
@@ -724,6 +784,17 @@ function handlePaneKey(event: KeyboardEvent): void {
     return
   }
 
+  // Ctrl+Enter is the full-screen viewing mode for the row under the cursor —
+  // Enter's own "bigger", and the keyboard half of the gesture a triple-click on
+  // the name makes with the mouse. It is claimed only with an empty command line
+  // and no search box up, like the other media keys: a typed line, or a search
+  // in progress, owns its keys.
+  if (isPlainCtrl(event) && event.key === 'Enter' && !searching && !hasInput) {
+    consume(event)
+    toggleFullscreen(activeSide.value)
+    return
+  }
+
   // The coarser companions to the ten-second arrows: Ctrl+J/Ctrl+L step the
   // clip being previewed by a minute, Ctrl+H/Ctrl+; by ten. Like the arrows
   // they are the clip's only while the command line has nothing typed in it —
@@ -1038,12 +1109,15 @@ onBeforeUnmount(() => {
           :active="activeSide === 'left'"
           :stage="stageSide === 'left' ? stageRequest : null"
           :displaying="stageSide === 'left'"
+          :fullscreen="stageFullscreen"
           :transferred="transferredSide === 'left'"
           :displayed-clock="transferredSide === 'left' ? displayedClock : null"
           :style="leftPaneStyle"
           @select="setActive('left')"
           @pointer-down="focusPanes"
           @activate="activateRow('left', false)"
+          @fullscreen="openFullscreen('left')"
+          @toggle-fullscreen="toggleDisplayFullscreen()"
           @step="stepShownPane"
           @stage-clock="displayedClock = $event"
           @stage-on="showStage('left')"
@@ -1096,12 +1170,15 @@ onBeforeUnmount(() => {
           :active="activeSide === 'right'"
           :stage="stageSide === 'right' ? stageRequest : null"
           :displaying="stageSide === 'right'"
+          :fullscreen="stageFullscreen"
           :transferred="transferredSide === 'right'"
           :displayed-clock="transferredSide === 'right' ? displayedClock : null"
           :style="rightPaneStyle"
           @select="setActive('right')"
           @pointer-down="focusPanes"
           @activate="activateRow('right', false)"
+          @fullscreen="openFullscreen('right')"
+          @toggle-fullscreen="toggleDisplayFullscreen()"
           @step="stepShownPane"
           @stage-clock="displayedClock = $event"
           @stage-on="showStage('right')"

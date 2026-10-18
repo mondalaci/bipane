@@ -42,12 +42,23 @@ const props = defineProps<{
    * row there is nothing to show for.
    */
   displaying?: boolean
+  /**
+   * Whether that display fills the whole window rather than this pane — the
+   * full-screen viewing mode. It is a presentation of the same display, not a
+   * different one: only the box the media and its transport are laid out in
+   * changes, and only while there is something being displayed.
+   */
+  fullscreen?: boolean
 }>()
 
 const emit = defineEmits<{
   (event: 'select'): void
   (event: 'pointer-down'): void
   (event: 'activate'): void
+  /** A triple-click on a media file's name: open it in the full-screen viewer. */
+  (event: 'fullscreen'): void
+  /** A double-click on the displayed media: switch it between the pane and the whole window. */
+  (event: 'toggle-fullscreen'): void
   /** A wheel outside the media: step the pane the display is showing for, by `delta` rows. */
   (event: 'step', delta: number): void
   (event: 'stage-clock', clock: PlaybackClock | null): void
@@ -579,6 +590,35 @@ function clearStageClock(): void {
 }
 
 /**
+ * Whether the display is laid out over the whole window rather than this pane —
+ * the full-screen viewing mode. It follows the prop, with one exception: leaving
+ * the mode clears the prop in the same flush that tears the display down, and the
+ * media has to still be laid out at the size it was when it animates back onto
+ * its thumbnail — so the full-window layout is held until the dismissal has
+ * landed rather than snapping back to the pane under the shrinking picture.
+ */
+const fullscreenPresentation = ref(false)
+
+watch(
+  () => props.fullscreen === true,
+  (on) => {
+    if (on) {
+      fullscreenPresentation.value = true
+      return
+    }
+
+    // The layout is held for exactly one case: the mode is being left
+    // (`props.stage` is null) while this pane still has a display to shrink back
+    // — then `runDismissal` clears it once the shrink has landed. Anything else
+    // drops it at once: a display that stays up with only its presentation
+    // changing (Ctrl+Enter back to the pane), and the pane that is not the
+    // display at all — which is handed the same `fullscreen` flag but has no
+    // overlay to lay out.
+    if (shownStage.value === null || props.stage !== null) fullscreenPresentation.value = false
+  }
+)
+
+/**
  * Blur the pane's own content while this pane is the display, and bring it back
  * into focus when the mode is left. It is the *mode* that blurs rather than the
  * media: navigating from a media file to an ordinary one empties the display for
@@ -843,6 +883,7 @@ async function runDismissal(): Promise<void> {
   if (stage === null || element === null) {
     shownStage.value = null
     stageState.value = 'idle'
+    fullscreenPresentation.value = false
     clearStageClock()
     emit('stage-clock', null)
     return
@@ -884,6 +925,7 @@ async function runDismissal(): Promise<void> {
 
   shownStage.value = null
   stageState.value = 'idle'
+  fullscreenPresentation.value = false
   clearStageClock()
   emit('stage-clock', null)
 }
@@ -921,6 +963,19 @@ function onStageVideoClick(event: MouseEvent): void {
   if (event.button !== 0) return
   if (performance.now() < stageClickSuppressedUntil) return
   togglePlayback(stageMedia.value)
+}
+
+/**
+ * A double left-click on the enlarged media switches it between its pane and the
+ * whole window — the mouse's way of the Ctrl+Enter the mode already answers, and
+ * the gesture a viewer is expected to make on the picture itself. It is the same
+ * for a clip and a still: on a video the two clicks that make up the double-click
+ * have each toggled play/pause already, so they cancel out and only the
+ * presentation is left to change; an image has no such click of its own.
+ */
+function onStageMediaDblclick(event: MouseEvent): void {
+  if (event.button !== 0) return
+  emit('toggle-fullscreen')
 }
 
 /** Pause or resume one video, answering whether there was one to toggle. */
@@ -1818,6 +1873,20 @@ function onRowDblclick(): void {
 }
 
 /**
+ * A third click on a media file's name is the mouse's Ctrl+Enter: open it in the
+ * full-screen viewer. The click count the browser reports is the whole of the
+ * gesture, and the double-click that came before it has already asked for the
+ * pane display — so a triple-click reads as one escalation (row -> pane -> whole
+ * window) rather than one gesture with a rule of its own. A name that is not
+ * media, or a click count that never reaches three, is left to the row.
+ */
+function onNameClick(index: number, event: MouseEvent): void {
+  if (event.detail !== 3) return
+  if (previewTargetFor(props.controller.state.entries[index]) === null) return
+  emit('fullscreen')
+}
+
+/**
  * Right-click marks a row, and holding the button paints that mark across
  * every row the pointer enters — the swipe-to-select gesture. The paint mode
  * is decided once, from the row the gesture started on: starting on an
@@ -2024,6 +2093,7 @@ function onRenameBlur(): void {
             v-else
             class="min-w-0 flex-1 truncate"
             :class="controller.isSelected(entry) ? 'text-selected' : ''"
+            @click="onNameClick(index, $event)"
             >{{ entry.name }}</span
           >
 
@@ -2153,10 +2223,17 @@ function onRenameBlur(): void {
          the blur — so this pane has one thing to look at while the folder it was
          showing is still there. No chrome of its own: the media is the display.
          Pointer events stop here so a click cannot move the cursor's pane away
-         from the one being navigated. -->
+         from the one being navigated.
+
+         In the full-screen viewing mode it is lifted out of the pane and fixed to
+         the window (`fixed inset-0`, over the tab strip and the terminal), but it
+         is the same display, laid out the same way: only the box the media is
+         measured in changes, so the transport, the seeking and the reveal all
+         carry over untouched. -->
     <div
       v-if="displaying || shownStage"
-      class="absolute inset-0 z-20 flex flex-col"
+      class="flex flex-col"
+      :class="fullscreenPresentation ? 'fixed inset-0 z-50 bg-bg' : 'absolute inset-0 z-20'"
       @mousedown="onStagePointerDown"
       @mouseup="onStagePointerUp"
       @click.stop
@@ -2193,6 +2270,7 @@ function onRenameBlur(): void {
               @play="stagePlaying = true"
               @pause="stagePlaying = false"
               @click="onStageVideoClick"
+              @dblclick="onStageMediaDblclick"
               @error="onStageError"
             ></video>
 
@@ -2272,6 +2350,7 @@ function onRenameBlur(): void {
             class="h-full w-full origin-top-left object-contain"
             :class="stageState === 'ready' ? '' : 'invisible'"
             @load="onStageShown"
+            @dblclick="onStageMediaDblclick"
             @error="onStageError"
           />
 
