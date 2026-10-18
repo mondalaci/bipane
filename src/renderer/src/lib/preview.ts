@@ -90,5 +90,13 @@ export interface StageRequest {
    */
   resumeAt: number | null
   from: () => DOMRect | null
+  /**
+   * The footer's small preview box at the moment the display is revealed, its
+   * bottom edge carried down so a clip's transport grows out from directly below
+   * the thumbnail rather than appearing in its final place — the same gesture
+   * the picture makes, and one that keeps the bar under it throughout. Null when
+   * the pane has no thumbnail to grow from.
+   */
+  barFrom: () => DOMRect | null
   animation: number
 }

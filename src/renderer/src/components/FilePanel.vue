@@ -482,6 +482,9 @@ const stageMedia = ref<HTMLImageElement | HTMLVideoElement | null>(null)
 /** The dismissal in flight, so that a display asked for again can call it off. */
 let stageDismissal: Animation | null = null
 
+/** The transport bar's own flight, so a reveal and a dismissal replace rather than stack. */
+let stageBarFlight: Animation | null = null
+
 /** Whether a dismissal is running, so that its gesture is neither doubled nor cut short. */
 let stageDismissing = false
 
@@ -616,6 +619,10 @@ watch(
     if (stage) {
       stageDismissal?.cancel()
       stageDismissal = null
+      // A dismissal that was shrinking the transport away is called off with it,
+      // so the new reveal owns the bar rather than letting a stale shrink land.
+      stageBarFlight?.cancel()
+      stageBarFlight = null
       shownStage.value = stage
       // A clip main has to encode is asked for from where the mode began; a clip
       // Chromium plays is loaded as it is and moved to that position.
@@ -763,6 +770,12 @@ function onStageShown(): void {
   if (stage.animation === stageAnimation) return
   stageAnimation = stage.animation
 
+  // The transport arrives with the picture rather than blinking into its final
+  // place: it grows out from below the thumbnail the same way the media grows
+  // out of it, so the whole player is one gesture and the bar stays under the
+  // picture as both scale.
+  void animateStageBar(stage.barFrom(), false)
+
   const from = stage.from()
   const drawn = drawnRect(element)
   if (!from || !drawn) return
@@ -770,6 +783,40 @@ function onStageShown(): void {
   element.animate(
     [{ transform: handoffTransform(from, drawn, element.getBoundingClientRect()) }, { transform: 'none' }],
     { duration: STAGE_REVEAL_MS, easing: 'ease-out' }
+  )
+}
+
+/**
+ * Move the display's transport between its own place and the rectangle below the
+ * footer's thumbnail, for a reveal (`reverse` false) and a dismissal (`reverse`
+ * true). It is the same translate-and-scale the media makes, applied to the
+ * bar's own box — the bar is drawn at its final size and laid back to sit under
+ * the small preview, so the two motions are one gesture. Answers a promise that
+ * settles whether the flight finished or was superseded.
+ */
+function animateStageBar(target: DOMRect | null, reverse: boolean): Promise<void> {
+  stageBarFlight?.cancel()
+  stageBarFlight = null
+
+  const bar = stageBarEl.value
+  if (bar === null || target === null) return Promise.resolve()
+
+  const box = bar.getBoundingClientRect()
+  if (box.width <= 0 || box.height <= 0) return Promise.resolve()
+
+  const transform = handoffTransform(target, box, box)
+  const flight = bar.animate(
+    reverse ? [{ transform: 'none' }, { transform }] : [{ transform }, { transform: 'none' }],
+    {
+      duration: STAGE_REVEAL_MS,
+      easing: reverse ? 'ease-in' : 'ease-out',
+      fill: reverse ? 'forwards' : 'none'
+    }
+  )
+  stageBarFlight = flight
+  return flight.finished.then(
+    () => {},
+    () => {}
   )
 }
 
@@ -823,10 +870,14 @@ async function runDismissal(): Promise<void> {
     )
   }
 
+  // The transport shrinks back under the small preview as the picture shrinks
+  // onto its thumbnail, so leaving the mode is the reveal played backwards.
+  const bars = animateStageBar(stage.barFrom(), true)
+
   const silenced =
     element instanceof HTMLVideoElement ? fadeVolume(element, 0, STAGE_REVEAL_MS) : Promise.resolve()
 
-  await Promise.all([moving, silenced])
+  await Promise.all([moving, bars, silenced])
 
   if (stageDismissal === shrink) stageDismissal = null
   if (shownStage.value !== stage) return
@@ -1132,6 +1183,21 @@ function previewRect(): DOMRect | null {
   const element = previewEl.value
   if (!element || element.offsetParent === null) return null
   return element.getBoundingClientRect()
+}
+
+/**
+ * The rectangle a clip's transport grows out of: the footer's thumbnail box,
+ * dropped to its own bottom edge — directly below the small preview, so the bar
+ * travels hugging the picture all the way rather than from wherever the strip's
+ * own little bar happens to sit. Null when this pane has no thumbnail up, since
+ * there is then nothing for a display to grow from.
+ */
+function previewBarRect(): DOMRect | null {
+  const element = previewEl.value
+  if (!element || element.offsetParent === null) return null
+  const box = element.getBoundingClientRect()
+  if (box.width <= 0 || box.height <= 0) return null
+  return new DOMRect(box.left, box.bottom, box.width, box.height)
 }
 
 /**
@@ -1585,6 +1651,7 @@ function onStagePointerUp(event: MouseEvent): void {
 defineExpose({
   contentEl,
   previewRect,
+  previewBarRect,
   previewPosition,
   seekPreview,
   seekStage,
@@ -2135,7 +2202,8 @@ function onRenameBlur(): void {
                  it is easy to grab and drag. -->
             <div
               ref="stageBarEl"
-              class="shrink-0 border-t border-border-subtle bg-surface px-2 py-2"
+              class="shrink-0 origin-top-left border-t border-border-subtle bg-surface px-2 py-2"
+              :class="stageState === 'ready' ? '' : 'invisible'"
             >
               <div class="flex select-none items-center gap-2 tabular-nums text-ui-sm text-fg-dim">
                 <button

@@ -146,7 +146,8 @@ const stageRequest = computed<StageRequest | null>(() => {
     target,
     animation: stageAnimation.value,
     resumeAt: held !== null && held.key === previewKeyFor(target) ? held.time : null,
-    from: () => asking.value?.previewRect() ?? null
+    from: () => asking.value?.previewRect() ?? null,
+    barFrom: () => asking.value?.previewBarRect() ?? null
   }
 })
 
