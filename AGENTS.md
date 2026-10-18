@@ -304,7 +304,11 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   it would move the keyboard, and with it which cursor is being displayed, to the
   other pane — and so is `Ctrl+U`, which swaps the panes themselves; switching
   tabs or closing one leaves the mode too, since the panes it belonged to are
-  gone. A display's media fills the pane however small the file is
+  gone. The mouse makes the same two gestures: a left-click on the footer
+  thumbnail asks for the display when one is not already up (`stage-on` →
+  `showStage`), and a right-click on the pane showing it leaves the mode
+  (`stage-off` → `exitStage`) — the mouse's `Enter` and `Escape`. A display's
+  media fills the pane however small the file is
   (`h-full w-full object-contain`), upscaled as far as its own aspect allows, so
   a 320x240 camcorder clip is not a postage stamp in the middle of it. The reveal
   is one animation of one element: the media is laid out where it will sit, then

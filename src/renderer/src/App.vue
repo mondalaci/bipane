@@ -188,7 +188,18 @@ function toggleStage(): void {
     return
   }
 
-  const side = activeSide.value
+  showStage(activeSide.value)
+}
+
+/**
+ * Put `side`'s preview up in the other pane — clicking its thumbnail, the
+ * mouse's way of the gesture Enter makes. Only ever turns the display on: one
+ * already up is left alone, since leaving the mode has its own gestures
+ * (Escape, or a right-click on the pane showing it).
+ */
+function showStage(side: PanelSide): void {
+  if (stageSide.value !== null) return
+
   const asking = side === 'left' ? leftPanel : rightPanel
   // Taken before the display exists, because the display is what takes the
   // element that was playing the clip away.
@@ -900,6 +911,8 @@ onBeforeUnmount(() => {
           @select="setActive('left')"
           @pointer-down="focusPanes"
           @stage-clock="displayedClock = $event"
+          @stage-on="showStage('left')"
+          @stage-off="exitStage()"
         />
         <div class="w-px shrink-0 bg-border"></div>
         <FilePanel
@@ -914,6 +927,8 @@ onBeforeUnmount(() => {
           @select="setActive('right')"
           @pointer-down="focusPanes"
           @stage-clock="displayedClock = $event"
+          @stage-on="showStage('right')"
+          @stage-off="exitStage()"
         />
       </main>
 

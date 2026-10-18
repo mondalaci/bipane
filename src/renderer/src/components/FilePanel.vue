@@ -48,6 +48,8 @@ const emit = defineEmits<{
   (event: 'select'): void
   (event: 'pointer-down'): void
   (event: 'stage-clock', clock: PlaybackClock | null): void
+  (event: 'stage-on'): void
+  (event: 'stage-off'): void
 }>()
 
 const listEl = ref<HTMLUListElement | null>(null)
@@ -1025,7 +1027,9 @@ const WHEEL_STEP_TEN_MINUTES = 600
 
 /**
  * Scrub the clip under the wheel. A wheel-up goes forward and a wheel-down
- * back, by the step the held button picks out.
+ * back, by the step the held button picks out. Answers whether it scrubbed, so
+ * a caller can tell a wheel that moved the clip from one that found nothing to
+ * move.
  *
  * Scoped to the media itself: the wheel over a clip scrubs it, while the wheel
  * over the listing still scrolls the listing, and a box with no clip leaves the
@@ -1034,8 +1038,8 @@ const WHEEL_STEP_TEN_MINUTES = 600
 function wheelScrub(
   event: WheelEvent,
   element: HTMLVideoElement | HTMLImageElement | null
-): void {
-  if (!(element instanceof HTMLVideoElement) || event.deltaY === 0) return
+): boolean {
+  if (!(element instanceof HTMLVideoElement) || event.deltaY === 0) return false
 
   const step =
     event.buttons & 2
@@ -1047,14 +1051,53 @@ function wheelScrub(
   event.preventDefault()
   event.stopPropagation()
   seek(element, event.deltaY < 0 ? step : -step)
+  return true
 }
 
 function onFooterWheel(event: WheelEvent): void {
   wheelScrub(event, previewVideo.value)
 }
 
+/**
+ * Whether a right press is down on the display, and whether it has scrubbed the
+ * clip since: a right press that scrolls is the wheel's ten-minute step, not a
+ * click, so the release must not read it as one.
+ */
+let rightPress = false
+let rightScrubbed = false
+
 function onStageWheel(event: WheelEvent): void {
-  wheelScrub(event, stageMedia.value)
+  if (wheelScrub(event, stageMedia.value) && (event.buttons & 2) !== 0) rightScrubbed = true
+}
+
+/**
+ * A left-click on the footer's thumbnail — the mouse's Enter: show this pane's
+ * media at full size in the other one.
+ */
+function onPreviewClick(): void {
+  emit('stage-on')
+}
+
+/**
+ * Mouse events on the pane that is displaying the other pane's media. They stop
+ * here so a click cannot reach the listing blurred behind them. A right-click
+ * leaves the mode — the mouse's Escape — but only when it was a click: a right
+ * press that scrolls is the wheel's ten-minute step, so a scrub while the button
+ * is held suppresses the release's exit.
+ */
+function onStagePointerDown(event: MouseEvent): void {
+  event.stopPropagation()
+  if (event.button !== 2) return
+  rightPress = true
+  rightScrubbed = false
+}
+
+function onStagePointerUp(event: MouseEvent): void {
+  if (event.button !== 2) return
+  const leave = rightPress && !rightScrubbed
+  rightPress = false
+  rightScrubbed = false
+  if (leave) emit('stage-off')
 }
 
 defineExpose({ previewRect, previewPosition, seekPreview, seekStage })
@@ -1404,6 +1447,7 @@ function onRenameBlur(): void {
             :style="previewBoxStyle"
             class="relative flex shrink-0 items-center justify-center overflow-hidden rounded border border-border-subtle bg-bg"
             @wheel="onFooterWheel"
+            @click="onPreviewClick"
           >
             <img
               v-if="showImage"
@@ -1495,9 +1539,11 @@ function onRenameBlur(): void {
     <div
       v-if="displaying || shownStage"
       class="absolute inset-0 z-20 flex flex-col"
-      @mousedown.stop
+      @mousedown="onStagePointerDown"
+      @mouseup="onStagePointerUp"
       @click.stop
       @dblclick.stop
+      @contextmenu.prevent
       @wheel="onStageWheel"
     >
       <div v-if="shownStage" class="relative flex min-h-0 grow items-center justify-center p-3">
