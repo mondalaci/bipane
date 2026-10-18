@@ -26,6 +26,12 @@ export interface Workspace {
   readonly right: Ref<PaneController>
   readonly shell: Shell
   readonly activeSide: Ref<PanelSide>
+  /**
+   * Whether the two panes are drawn in the other order, which is the whole of a
+   * Ctrl+U exchange: the panes change columns without anything inside them being
+   * rebuilt for it (see `swapPanels`).
+   */
+  readonly columnsSwapped: Ref<boolean>
   readonly terminalExpanded: Ref<boolean>
   readonly terminalFocused: Ref<boolean>
   readonly activePane: ComputedRef<PaneController>
@@ -58,6 +64,7 @@ export function createWorkspace(id: string, label: string): Workspace {
     const shell = createShell(id)
 
     const activeSide = ref<PanelSide>('left')
+    const columnsSwapped = ref(false)
     const terminalExpanded = ref(false)
     const terminalFocused = ref(false)
 
@@ -66,17 +73,16 @@ export function createWorkspace(id: string, label: string): Workspace {
     const activePanePath = computed(() => activePane.value.state.path)
 
     /**
-     * Ctrl+U exchanges the two panels. The swap is a rebinding, not a
-     * re-listing: each controller keeps its directory, cursor, marks and filter,
-     * and they simply trade columns. `activeSide` is flipped with them so the
-     * active pane follows its directory to the other column rather than the
-     * highlight staying put.
+     * Ctrl+U exchanges the two panels' *columns*, and nothing else. Each pane
+     * keeps its directory, cursor, marks, filter and its own DOM: the two change
+     * place rather than being re-bound to the other's state, and `App.vue` draws
+     * them in the other order — so a display among them goes on playing, and a
+     * footer goes on showing the picture it had, instead of both being taken
+     * down and built again on the other side. The active pane is the one holding
+     * the cursor, so it is still the active one; it has simply moved.
      */
     function swapPanels(): void {
-      const previous = left.value
-      left.value = right.value
-      right.value = previous
-      activeSide.value = activeSide.value === 'left' ? 'right' : 'left'
+      columnsSwapped.value = !columnsSwapped.value
     }
 
     // A filter belongs to the pane it was typed in.
@@ -228,6 +234,7 @@ export function createWorkspace(id: string, label: string): Workspace {
       right,
       shell,
       activeSide,
+      columnsSwapped,
       terminalExpanded,
       terminalFocused,
       activePane,

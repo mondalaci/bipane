@@ -43,11 +43,14 @@ const activeWorkspace = computed(() => workspaces.value[activeIndex.value] ?? wo
  * The active workspace's bindings, surfaced as plain computeds so the rest of
  * the component (and the template) reads them the way the old single-workspace
  * code did. They re-evaluate when the active workspace, or one of its refs,
- * changes — a Ctrl+U swap inside a workspace included.
+ * changes. `left` and `right` are the two panes themselves rather than the
+ * columns they are drawn in: a Ctrl+U exchange does not re-bind them, it only
+ * asks for them to be drawn in the other order (`columnsSwapped`).
  */
 const left = computed(() => activeWorkspace.value.left.value)
 const right = computed(() => activeWorkspace.value.right.value)
 const activeSide = computed(() => activeWorkspace.value.activeSide.value)
+const columnsSwapped = computed(() => activeWorkspace.value.columnsSwapped.value)
 const activePane = computed(() => activeWorkspace.value.activePane.value)
 const inactivePane = computed(() => activeWorkspace.value.inactivePane.value)
 const activePanePath = computed(() => activeWorkspace.value.activePanePath.value)
@@ -179,23 +182,38 @@ watch(stageTarget, (target) => {
 })
 
 /**
- * Display the media under the active pane's cursor in the other pane. Pressing
- * Enter again on what is already displayed takes the display away.
+ * Open the row under `side`'s cursor — Enter, and a double-click on the row. An
+ * image or a video is displayed in the *other* pane rather than handed to
+ * whatever the system opens it with; anything else — a directory, an ordinary
+ * file — opens exactly as it did.
+ *
+ * `again` is Enter's own extra: pressed once more on what a display is already
+ * showing, it takes the display away. A double-click only ever asks for one,
+ * since leaving the mode has gestures of its own (Escape, and a right-click on
+ * the pane showing it).
  */
-function toggleStage(): void {
-  if (stageSide.value !== null) {
-    exitStage()
+function activateRow(side: PanelSide, again: boolean): void {
+  const pane = side === 'left' ? left.value : right.value
+
+  if (previewTargetFor(pane.current()) === null) {
+    void pane.activate()
     return
   }
 
-  showStage(activeSide.value)
+  if (!again) {
+    showStage(side)
+    return
+  }
+
+  if (stageSide.value !== null) exitStage()
+  else showStage(side)
 }
 
 /**
- * Put `side`'s preview up in the other pane — clicking its thumbnail, the
- * mouse's way of the gesture Enter makes. Only ever turns the display on: one
- * already up is left alone, since leaving the mode has its own gestures
- * (Escape, or a right-click on the pane showing it).
+ * Put `side`'s preview up in the other pane — clicking its thumbnail, or
+ * double-clicking the row, the mouse's ways of the gesture Enter makes. Only ever
+ * turns the display on: one already up is left alone, since leaving the mode has
+ * its own gestures (Escape, or a right-click on the pane showing it).
  */
 function showStage(side: PanelSide): void {
   if (stageSide.value !== null) return
@@ -284,6 +302,23 @@ const splitRatio = ref(DEFAULT_SPLIT)
 /** Off-centre is what puts the re-centre button on the handle. */
 const splitCentered = computed(() => splitRatio.value === DEFAULT_SPLIT)
 
+/**
+ * Where each pane sits in the row. A Ctrl+U exchange is drawn by reordering the
+ * two rather than by rebuilding either (see `swapPanels` in `useWorkspace.ts`),
+ * so this is the whole of it: `order` moves the boxes, and the growth is given
+ * to whichever pane is drawn on the left so that it is the *columns* that keep
+ * the sizes they had — the divider stays where the user put it.
+ */
+const leftPaneStyle = computed(() => ({
+  order: columnsSwapped.value ? 2 : 0,
+  flexGrow: columnsSwapped.value ? 1 - splitRatio.value : splitRatio.value
+}))
+
+const rightPaneStyle = computed(() => ({
+  order: columnsSwapped.value ? 0 : 2,
+  flexGrow: columnsSwapped.value ? splitRatio.value : 1 - splitRatio.value
+}))
+
 function clampSplit(ratio: number): number {
   return Math.min(MAX_SPLIT, Math.max(MIN_SPLIT, ratio))
 }
@@ -333,17 +368,11 @@ function setActive(side: PanelSide): void {
 }
 
 function swapPanels(): void {
-  // A display goes whatever swapped the panes, but its own gesture is the media
-  // shrinking back onto the thumbnail it came from, so the exchange goes through
-  // unanimated rather than as a second motion under that one.
-  const wasDisplaying = stageSide.value !== null
-  exitStage()
-
   const host = panelHost.value
   const leftPane = leftPanel.value?.$el as HTMLElement | undefined
   const rightPane = rightPanel.value?.$el as HTMLElement | undefined
 
-  if (wasDisplaying || !host || !leftPane || !rightPane) {
+  if (!host || !leftPane || !rightPane) {
     activeWorkspace.value.swapPanels()
     return
   }
@@ -352,6 +381,7 @@ function swapPanels(): void {
     host,
     left: leftPane,
     right: rightPane,
+    contents: [leftPanel.value?.contentEl() ?? null, rightPanel.value?.contentEl() ?? null],
     apply: () => activeWorkspace.value.swapPanels()
   })
 }
@@ -801,11 +831,7 @@ function handlePaneKey(event: KeyboardEvent): void {
       // exactly as the user left it.
       if (hasInput) return
       consume(event)
-      // An image or a video is displayed in the other pane rather than handed
-      // to whatever the system opens it with; anything else — a directory, an
-      // ordinary file — opens exactly as it did.
-      if (previewTargetFor(pane.current()) === null) void pane.activate()
-      else toggleStage()
+      activateRow(activeSide.value, true)
       break
     default:
       break
@@ -999,9 +1025,10 @@ onBeforeUnmount(() => {
           :displaying="stageSide === 'left'"
           :transferred="transferredSide === 'left'"
           :displayed-clock="transferredSide === 'left' ? displayedClock : null"
-          :style="{ flexGrow: splitRatio }"
+          :style="leftPaneStyle"
           @select="setActive('left')"
           @pointer-down="focusPanes"
+          @activate="activateRow('left', false)"
           @stage-clock="displayedClock = $event"
           @stage-on="showStage('left')"
           @stage-off="exitStage()"
@@ -1014,8 +1041,10 @@ onBeforeUnmount(() => {
              and that pane's own overlays are `z-20` layers: under them, only the
              half hanging over the empty side took a click. `isolate` on the row
              above keeps that rank inside the row, so the viewer and the dialogs,
-             which are outside it, still cover everything. -->
-        <div class="relative z-30 w-px shrink-0 bg-border">
+             which are outside it, still cover everything. It is drawn between
+             the two panes whichever column each is in — `order` is what puts it
+             back in the middle when a Ctrl+U exchange has moved them. -->
+        <div class="relative z-30 w-px shrink-0 bg-border" :style="{ order: 1 }">
           <div
             class="absolute inset-y-0 -left-1 -right-1 z-10 cursor-col-resize"
             @pointerdown="startSplitDrag"
@@ -1053,9 +1082,10 @@ onBeforeUnmount(() => {
           :displaying="stageSide === 'right'"
           :transferred="transferredSide === 'right'"
           :displayed-clock="transferredSide === 'right' ? displayedClock : null"
-          :style="{ flexGrow: 1 - splitRatio }"
+          :style="rightPaneStyle"
           @select="setActive('right')"
           @pointer-down="focusPanes"
+          @activate="activateRow('right', false)"
           @stage-clock="displayedClock = $event"
           @stage-on="showStage('right')"
           @stage-off="exitStage()"

@@ -47,6 +47,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (event: 'select'): void
   (event: 'pointer-down'): void
+  (event: 'activate'): void
   (event: 'stage-clock', clock: PlaybackClock | null): void
   (event: 'stage-on'): void
   (event: 'stage-off'): void
@@ -1078,6 +1079,16 @@ watch(
   { immediate: true }
 )
 
+/**
+ * The box this pane's own content is drawn in, for the copies a Ctrl+U exchange
+ * travels: a display blurs that content with a filter the app applied through the
+ * Web Animations API, which a clone carries neither directly nor as a style
+ * attribute — so the copy reads it from here.
+ */
+function contentEl(): HTMLElement | null {
+  return paneContent.value
+}
+
 function previewRect(): DOMRect | null {
   const element = previewEl.value
   if (!element || element.offsetParent === null) return null
@@ -1484,6 +1495,7 @@ function onStagePointerUp(event: MouseEvent): void {
 }
 
 defineExpose({
+  contentEl,
   previewRect,
   previewPosition,
   seekPreview,
@@ -1596,6 +1608,17 @@ function onPointerDown(event: MouseEvent): void {
 
 function onRowClick(index: number): void {
   props.controller.moveTo(index)
+}
+
+/**
+ * What opening the row under the cursor means is the App's call, not this pane's:
+ * a directory descends, an ordinary file goes to whatever the system opens it
+ * with, and an image or a video is displayed in the *other* pane instead. The
+ * click that came first has already put the cursor here (`onRowClick`), which is
+ * the row this asks about.
+ */
+function onRowDblclick(): void {
+  emit('activate')
 }
 
 /**
@@ -1781,7 +1804,7 @@ function onRenameBlur(): void {
           @mouseenter="onRowEnter(index)"
           @contextmenu.prevent
           @click="onRowClick(index)"
-          @dblclick="controller.activate()"
+          @dblclick="onRowDblclick"
         >
           <span class="flex w-4 shrink-0 items-center justify-center">
             <FileIcon :entry="entry" />
@@ -2065,7 +2088,7 @@ function onRenameBlur(): void {
         class="flex min-h-0 grow flex-col items-center justify-center gap-1 p-3 text-center"
       >
         <span class="text-ui text-fg">Preview mode</span>
-        <span class="text-ui-sm text-fg-dim">Esc to exit</span>
+        <span class="text-ui-sm text-fg-dim">Esc or right-click to exit</span>
       </div>
     </div>
   </section>

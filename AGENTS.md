@@ -84,7 +84,9 @@ src/renderer/src/lib/fileIcon.ts             per-entry icon: name/extension -> 2
                                              (FILENAME_ICONS, EXTENSION_ICONS, fallback text)
 src/renderer/src/lib/swapAnimation.ts        how a Ctrl+U exchange is shown: copies of
                                              both panes travelling to the other column,
-                                             and the layer they travel in (styles/swap.css)
+                                             carrying the blur a display puts on the
+                                             pane's own content, and the layer they
+                                             travel in (styles/swap.css)
 ```
 
 Keys: `Tab` switches panes, arrows/`Home`/`End`/`PgUp`/`PgDn` move the cursor
@@ -96,7 +98,9 @@ shell, whose `Ctrl+H` is backspace, `Ctrl+L` clear-screen and `Ctrl+J`
 accept-line; `Space` pauses or resumes the clip being watched there — the
 display's, or the footer preview if none is up — and stays the shell's own space
 when there is no clip to toggle), `Enter` descends or opens with the system default app — except on an image or a
-video, which it displays in the other pane instead (see below), `F3` opens a regular file
+video, which it displays in the other pane instead (see below) — and a
+double-click on a row is the same thing with the mouse (`activate` →
+`activateRow`), `F3` opens a regular file
 read-only in the Monaco viewer, `F4` opens it for editing with Ctrl+S to save (a
 directory still descends on `F3`), `Insert` marks the current entry and moves down,
 right-click marks a row and dragging the held button paints that mark across
@@ -107,10 +111,11 @@ shell) at the right of the tab strip, focused — `Ctrl+W` closes the active one
 next/previous workspace, `Shift+Ctrl+PageDown`/`Shift+Ctrl+PageUp` (or dragging a
 tab) move the active workspace right/left in the strip, `Ctrl+U` swaps the two
 panels (each keeps its cursor,
-marks and filter) — the panes change columns in one frame, since the swap is a
-rebinding and not a redraw, so the exchange is shown as copies of both of them
-travelling to the other column — except with a display up, whose dismissal is
-already its own gesture, where the swap goes through unanimated,
+marks and filter) — the panes change columns in one frame, since the two are
+reordered in the row rather than rebuilt, so the exchange is shown as copies of
+both of them travelling to the other column, and nothing in a pane stops for it:
+a display among them goes on playing as it changes column, and the columns keep
+the sizes they had, so the divider does not move,
 `Alt+S` starts an incremental search, `F5` copies the marked entries (or the
 cursor row) into the other pane, `F6` moves them there (its destination field
 names a directory to move into, but for a single entry a path that is not a
@@ -297,7 +302,8 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   otherwise spill over the border into the pane next door. That blur
   belongs to the *mode*, not to whatever is being shown: on a row there is
   nothing to display for, the display empties but the pane stays blurred and
-  covered — saying so, and how to leave (`Preview mode` / `Esc to exit`) — and
+  covered — saying so, and how to leave (`Preview mode` / `Esc or right-click to
+  exit`, the two ways out) — and
   coming back to a media file fills it again. The display itself carries no
   chrome, not even the file's name, so the media is all there is to look at —
   except a video's play bar directly beneath it, exactly as wide as the picture,
@@ -311,11 +317,20 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   update it for free; leaving media for an ordinary row empties the screen
   instead of freezing the last picture. `Tab` is claimed while a display is up —
   it would move the keyboard, and with it which cursor is being displayed, to the
-  other pane — and so is `Ctrl+U`, which swaps the panes themselves; switching
-  tabs or closing one leaves the mode too, since the panes it belonged to are
-  gone. The mouse makes the same two gestures: a left-click on the footer
+  other pane — while `Ctrl+U` swaps the panes and takes the display with them: a
+  display belongs to a *pane*, not to a column, so the exchange is not a reason to
+  leave the mode — the pane that was showing shows on from the other column, and
+  the pane that asked stays the active one, now in the other column itself.
+  Nothing of the display is taken down for it: the panes are reordered rather than
+  rebuilt (see `swapPanels` in `useWorkspace.ts`), so what is on screen is the same
+  element, still wherever the clip had got to, and a clip main has to encode goes
+  on streaming instead of being asked for again at that offset. Switching tabs or
+  closing one leaves the mode too, since the panes it belonged to are gone. The
+  mouse makes the same two gestures: a left-click on the footer
   thumbnail asks for the display when one is not already up (`stage-on` →
-  `showStage`), and a quick right-click on the pane showing it leaves the mode
+  `showStage`) — as does a double-click on the row of an image or a video, which
+  is `Enter` on it without its toggling back off (`activate` → `activateRow`) —
+  and a quick right-click on the pane showing it leaves the mode
   (`stage-off` → `exitStage`) — the mouse's `Enter` and `Escape`; a held right
   press, or one that wheel-scrubs the clip, is not that click. A display's
   media fills the pane however small the file is
