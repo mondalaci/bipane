@@ -47,8 +47,24 @@ export interface Workspace {
  * shell echoes it and the strip fills up with commands the user never issued.
  * Appending a printf that walks back over the echoed line and clears it hides
  * the sync, and `&&` means a failed `cd` still shows its error.
+ *
+ * The echo is not the only trace: readline adds the line to the history list
+ * *before* running it, so Up would offer the sync as though the user had typed
+ * it. The injected line therefore ends by deleting the entry it just became —
+ * `history -d` on the number it is now, which is `$HISTCMD`. That is bash's own
+ * builtin, hence the guard: `$SHELL` is whatever the user runs, and a shell
+ * without it must not be handed a command that errors.
+ *
+ * The line deliberately starts at column 0. A *space*-prefixed line is the
+ * usual way to ask a shell to forget a line, but `HISTCONTROL`/`HIST_IGNORE_SPACE`
+ * drop it before it is ever numbered, so `$HISTCMD` would still name the user's
+ * previous command and the delete would take that one instead. With no leading
+ * space the entry is always ours: if a shell ignores the line anyway (bash's
+ * `ignoredups`, on a repeat) the worst the delete can reach is an earlier copy
+ * of this same line.
  */
 const ERASE_ECHO = "printf '\\033[1A\\033[2K'"
+const FORGET_LINE = '[ -n "$BASH_VERSION" ] && history -d "$HISTCMD" 2>/dev/null'
 
 function shellQuote(value: string): string {
   return "'" + value.replaceAll("'", "'\\''") + "'"
@@ -118,7 +134,7 @@ export function createWorkspace(id: string, label: string): Workspace {
       if (pendingTimer !== null) window.clearTimeout(pendingTimer)
       pendingTimer = window.setTimeout(clearPendingPush, 3000)
 
-      shell.write(`cd ${shellQuote(target)} && ${ERASE_ECHO}\r`)
+      shell.write(`cd ${shellQuote(target)} && ${ERASE_ECHO}; ${FORGET_LINE}\r`)
     }
 
     watch([activePanePath, shell.idle, shell.started, shell.inputLine], pushCwdToShell)

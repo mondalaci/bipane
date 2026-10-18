@@ -513,7 +513,17 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   injected line carries a trailing `printf '\033[1A\033[2K'` that walks back
   over the echo and clears it, so only the new prompt shows. `&&` keeps a failed
   `cd` visible as an error. Gating on an empty input line is what stops the
-  injection from being appended to a half-typed command. This erase only works
+  injection from being appended to a half-typed command. Erasing the echo is
+  only half of it, because readline added the line to the **history list** before
+  running it, so Up offered the sync as if the user had typed it: the line ends
+  by deleting the entry it just became (`history -d "$HISTCMD"`, guarded on
+  `$BASH_VERSION` so a non-bash `$SHELL` is not handed a command that errors).
+  It must *not* be prefixed with a space: a space is the usual request to forget
+  a line, but `HISTCONTROL=ignorespace` drops it before it is ever numbered, so
+  `$HISTCMD` would still name the user's previous command and the delete would
+  take that one. Started at column 0 the entry is always ours — and if a shell
+  drops the line anyway (`ignoredups` on a repeat) the worst it can reach is an
+  earlier copy of this same line. This erase only works
   while the terminal has a row to spare: a **one-row** terminal scrolls on every
   newline, so the echoed `cd` leaves the viewport for the scrollback before the
   `printf` runs, and `Ctrl+O` then shows a transcript of them. `refit()` in
