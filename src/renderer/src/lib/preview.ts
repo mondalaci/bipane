@@ -65,6 +65,17 @@ export function previewKeyFor(target: PreviewTarget | null): string | null {
 }
 
 /**
+ * Where a playing clip has got to: its position, and its length once that is
+ * knowable. A clip that has been transferred to a display is played only there,
+ * so its own pane reads this from the display rather than from an element of its
+ * own.
+ */
+export interface PlaybackClock {
+  time: number
+  length: number | null
+}
+
+/**
  * What one pane asks another to display: the media under *its* cursor, plus how
  * to find the thumbnail that media is already shown as — the box the display
  * grows out of. `animation` changes only when a display should be revealed with

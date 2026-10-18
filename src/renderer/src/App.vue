@@ -9,7 +9,12 @@ import TitleBar from '@renderer/components/TitleBar.vue'
 import FileViewer from '@renderer/components/FileViewer.vue'
 import { createWorkspace, type Workspace } from '@renderer/composables/useWorkspace'
 import type { PaneController, PaneEntry } from '@renderer/composables/useDirectory'
-import { loadTranscodeSupport, previewTargetFor, type StageRequest } from '@renderer/lib/preview'
+import {
+  loadTranscodeSupport,
+  previewTargetFor,
+  type PlaybackClock,
+  type StageRequest
+} from '@renderer/lib/preview'
 import type { PanelSide } from '@shared/types'
 
 /**
@@ -137,6 +142,21 @@ const stageRequest = computed<StageRequest | null>(() => {
 })
 
 /**
+ * Where the enlarged clip has got to, as the display reports it. The pane that
+ * asked for the display no longer plays that clip itself, so this is what its
+ * play bar is drawn from.
+ */
+const displayedClock = ref<PlaybackClock | null>(null)
+
+/**
+ * The pane whose cursor media a display has taken over: it is the one being
+ * navigated, and the one that gives up its own copy of the clip.
+ */
+const transferredSide = computed<PanelSide | null>(() =>
+  stageSide.value === null ? null : stageSource.value
+)
+
+/**
  * Display the media under the active pane's cursor in the other pane. Pressing
  * Enter again on what is already displayed takes the display away.
  */
@@ -147,6 +167,7 @@ function toggleStage(): void {
 
 function exitStage(): void {
   stageSide.value = null
+  displayedClock.value = null
 }
 
 /**
@@ -797,8 +818,11 @@ onBeforeUnmount(() => {
           :controller="left"
           :active="activeSide === 'left'"
           :stage="stageSide === 'left' ? stageRequest : null"
+          :transferred="transferredSide === 'left'"
+          :displayed-clock="transferredSide === 'left' ? displayedClock : null"
           @select="setActive('left')"
           @pointer-down="focusPanes"
+          @stage-clock="displayedClock = $event"
         />
         <div class="w-px shrink-0 bg-border"></div>
         <FilePanel
@@ -807,8 +831,11 @@ onBeforeUnmount(() => {
           :controller="right"
           :active="activeSide === 'right'"
           :stage="stageSide === 'right' ? stageRequest : null"
+          :transferred="transferredSide === 'right'"
+          :displayed-clock="transferredSide === 'right' ? displayedClock : null"
           @select="setActive('right')"
           @pointer-down="focusPanes"
+          @stage-clock="displayedClock = $event"
         />
       </main>
 

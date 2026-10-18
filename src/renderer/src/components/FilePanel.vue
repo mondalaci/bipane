@@ -3,7 +3,13 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ComponentPublicInstance } from 'vue'
 import type { PaneController, ScrollAlign } from '@renderer/composables/useDirectory'
 import { formatDate, formatDuration, formatMode, formatSize } from '@renderer/lib/format'
-import { previewKeyFor, previewTargetFor, type StageRequest } from '@renderer/lib/preview'
+import {
+  previewKeyFor,
+  previewTargetFor,
+  type PlaybackClock,
+  type PreviewTarget,
+  type StageRequest
+} from '@renderer/lib/preview'
 import FileIcon from '@renderer/components/FileIcon.vue'
 import { MEDIA_SCHEME, needsTranscode } from '@shared/video'
 import type { PixelSize } from '@shared/types'
@@ -21,11 +27,20 @@ const props = defineProps<{
   controller: PaneController
   active: boolean
   stage?: StageRequest | null
+  /**
+   * Whether the media under this pane's cursor is being shown at full size in
+   * the other pane. It is played there and only there — a second element would
+   * decode it twice to draw the same thing — so this pane keeps the space its
+   * preview had and reads the position from the display instead.
+   */
+  transferred?: boolean
+  displayedClock?: PlaybackClock | null
 }>()
 
 const emit = defineEmits<{
   (event: 'select'): void
   (event: 'pointer-down'): void
+  (event: 'stage-clock', clock: PlaybackClock | null): void
 }>()
 
 const listEl = ref<HTMLUListElement | null>(null)
@@ -78,6 +93,9 @@ const footerTall = computed(() => previewTarget.value !== null)
  */
 const previewVisible = computed(() => {
   if (previewTarget.value === null) return false
+  // A clip a display has taken over keeps the space its box had — the footer
+  // must not move under the cursor — even though there is nothing to draw in it.
+  if (props.transferred === true) return true
   if (previewState.value === 'loading' || previewState.value === 'ready') return true
   return previewState.value === 'probing' && sizeHint.value !== null
 })
@@ -117,8 +135,12 @@ const showVideo = computed(
  * that is the whole encode, seconds of a strip that otherwise shows an empty box
  * and looks broken while nothing appears to happen.
  */
+// While a display has the clip, whatever is still loading is its business rather
+// than this box's: a spinner here would sit there for as long as the clip stays
+// enlarged, promising something that is not coming.
 const showSpinner = computed(
-  () => previewVisible.value && previewState.value !== 'ready'
+  () =>
+    previewVisible.value && previewState.value !== 'ready' && props.transferred !== true
 )
 
 const PREVIEW_HEIGHT = 64
@@ -437,6 +459,8 @@ function onStageShown(): void {
   const element = stageMedia.value
   if (!stage || !element) return
 
+  readStageClock()
+
   if (element instanceof HTMLVideoElement) {
     element.muted = false
     element.volume = 0
@@ -479,6 +503,7 @@ async function dismissStage(): Promise<void> {
   if (stage === null || element === null) {
     shownStage.value = null
     stageState.value = 'idle'
+    emit('stage-clock', null)
     return
   }
 
@@ -518,6 +543,7 @@ async function dismissStage(): Promise<void> {
 
   shownStage.value = null
   stageState.value = 'idle'
+  emit('stage-clock', null)
 }
 
 function onStageError(): void {
@@ -545,28 +571,25 @@ const clipLength = ref<number | null>(null)
 let clipLengthKey: string | null = null
 
 /**
- * Follow the footer's clip for the play bar beside its thumbnail: the position
- * always, and the length only once the clip is a whole file that can be measured
- * and moved within. A clip main is still encoding arrives as a live stream, whose
- * "length" is a growing estimate of what has been encoded so far — a bar drawn
- * from that would misstate a three-minute file as a four-second one.
+ * Where a clip has got to, as its own element reports it: its position always,
+ * and its length only once it is a whole file with a range that is really there.
+ * A clip main is still encoding arrives as a live stream, whose "length" is a
+ * growing estimate of what has been encoded so far — a bar drawn from that would
+ * misstate a three-minute file as a four-second one.
  */
-function readVideoClock(): void {
-  const element = previewVideo.value
-  if (!(element instanceof HTMLVideoElement)) return
-
-  videoTime.value = element.currentTime
-
+function clockOf(element: HTMLVideoElement): PlaybackClock {
   const ranges = element.seekable
   const measured =
     Number.isFinite(element.duration) && ranges.length > 0 && ranges.end(ranges.length - 1) > 0
-  videoLength.value = measured ? element.duration : null
-  if (measured) return
+  return { time: element.currentTime, length: measured ? element.duration : null }
+}
 
-  // A clip still being encoded is a live stream, which has no length of its own
-  // to report: ask the file, once, for the row the cursor has settled on.
-  const target = previewTarget.value
-  if (!target || !needsTranscode(target.name)) return
+/**
+ * Ask the file itself how long a clip is, for one whose stream cannot say. Asked
+ * once per file, and only for a clip main has to encode.
+ */
+function ensureClipLength(target: PreviewTarget): void {
+  if (!needsTranscode(target.name)) return
 
   const key = previewKeyFor(target)
   if (key === null || key === clipLengthKey) return
@@ -577,14 +600,49 @@ function readVideoClock(): void {
   })
 }
 
-/** The length the bar is drawn against: what the element can report, or the file's own. */
-const playLength = computed(() => videoLength.value ?? clipLength.value)
+/**
+ * Follow the footer's clip for the play bar beside its thumbnail.
+ */
+function readVideoClock(): void {
+  const element = previewVideo.value
+  if (!(element instanceof HTMLVideoElement)) return
+
+  const clock = clockOf(element)
+  videoTime.value = clock.time
+  videoLength.value = clock.length
+
+  // A clip still being encoded is a live stream, which has no length of its own
+  // to report: ask the file, once, for the row the cursor has settled on.
+  const target = previewTarget.value
+  if (clock.length === null && target) ensureClipLength(target)
+}
+
+/**
+ * Where the enlarged clip has got to, published for the pane that asked for it:
+ * that pane no longer holds an element of its own to read it from.
+ */
+function readStageClock(): void {
+  const element = stageMedia.value
+  emit('stage-clock', element instanceof HTMLVideoElement ? clockOf(element) : null)
+}
+
+/**
+ * The clock the bar is drawn from: this pane's own clip, or the display's while
+ * the clip has been transferred to it.
+ */
+const playTime = computed(() => (props.transferred ? (props.displayedClock?.time ?? 0) : videoTime.value))
+
+const playLength = computed(() =>
+  props.transferred
+    ? (props.displayedClock?.length ?? clipLength.value)
+    : (videoLength.value ?? clipLength.value)
+)
 
 /** How much of the clip the bar has filled. */
 const playProgress = computed(() => {
   const length = playLength.value
   if (length === null || length <= 0) return '0%'
-  const ratio = Math.min(Math.max(videoTime.value / length, 0), 1)
+  const ratio = Math.min(Math.max(playTime.value / length, 0), 1)
   return `${(ratio * 100).toFixed(2)}%`
 })
 
@@ -597,8 +655,22 @@ const playProgress = computed(() => {
 const showPlayBar = computed(
   () =>
     previewTarget.value?.kind === 'video' &&
-    showVideo.value &&
-    (playLength.value !== null || videoTime.value > 0)
+    (props.transferred === true || showVideo.value) &&
+    (playLength.value !== null || playTime.value > 0)
+)
+
+/**
+ * The clip a display has taken over is played *there*, so this pane asks the file
+ * for its length itself: nothing of this pane's own will report one.
+ */
+watch(
+  () => (props.transferred === true ? previewKeyFor(previewTarget.value) : null),
+  (key) => {
+    if (key === null) return
+    const target = previewTarget.value
+    if (target) ensureClipLength(target)
+  },
+  { immediate: true }
 )
 
 function previewRect(): DOMRect | null {
@@ -1008,7 +1080,7 @@ function onRenameBlur(): void {
                clip, not a viewing session, and a looping 4K file would decode
                for as long as the cursor happens to rest on the row. -->
           <video
-            v-else-if="showVideo"
+            v-else-if="showVideo && !transferred"
             ref="previewVideo"
             :src="videoUrl ?? undefined"
             muted
@@ -1045,7 +1117,7 @@ function onRenameBlur(): void {
           v-if="showPlayBar"
           class="flex shrink-0 items-center gap-2 tabular-nums text-ui-sm text-fg-dim"
         >
-          <span>{{ formatDuration(videoTime) }}</span>
+          <span>{{ formatDuration(playTime) }}</span>
           <span
             v-if="playLength !== null"
             class="h-1 w-20 overflow-hidden rounded-full bg-border"
@@ -1119,6 +1191,10 @@ function onRenameBlur(): void {
           class="max-h-full max-w-full origin-top-left object-contain"
           :class="stageState === 'ready' ? '' : 'invisible'"
           @loadeddata="onStageShown"
+          @timeupdate="readStageClock"
+          @durationchange="readStageClock"
+          @seeked="readStageClock"
+          @ended="readStageClock"
           @error="onStageError"
         ></video>
         <span

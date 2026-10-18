@@ -74,8 +74,10 @@ src/renderer/src/composables/useShell.ts     createShell(id): one shell session
 src/renderer/src/composables/useDirectory.ts per-pane navigation state + actions
 src/renderer/src/lib/format.ts               size/date/permission formatting
 src/renderer/src/lib/preview.ts              what a row is previewable as (image or
-                                             video), keyed by content, and what one
-                                             pane asks another to display
+                                             video), keyed by content, where a
+                                             playing clip has got to (PlaybackClock),
+                                             and what one pane asks another to
+                                             display
 src/renderer/src/lib/monaco.ts               lazy monaco import + worker wiring
 src/renderer/src/lib/fileIcon.ts             per-entry icon: name/extension -> 24x24 svg
                                              (FILENAME_ICONS, EXTENSION_ICONS, fallback text)
@@ -299,7 +301,16 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   and ramped back down — ending muted — as it shrinks away. The footer's own
   thumbnail stays silent throughout. The ramp follows frame callbacks for
   smoothness but is bounded in time as well, because those stop while the window
-  is hidden and a dismissal waits on it. With the command line
+  is hidden and a dismissal waits on it. The display *takes the clip over*: the
+  pane that asked gives up its own copy rather than playing it twice — no
+  `<video>` is mounted in its footer, so a 4K clip is not decoded to draw the
+  same thing twice — while the space the thumbnail had is kept, so nothing about
+  the strip moves and the shrink still has somewhere to land. Its play bar is
+  drawn from the display instead: the displaying pane publishes the clock it is
+  playing (`stage-clock`, a `PlaybackClock`) and the pane that asked reads it,
+  asking the file itself for a length when the display can only say where it is
+  (a clip still being encoded). Dismissing hands the clip back, and the footer's
+  own element starts it over. With the command line
   empty the arrow keys are a scrubber for what is showing (`seekPreview` steps
   the footer's clip and, when a display is up, the same clip in the other pane, so
   the two cannot drift apart): stepping back into a clip that had played itself
