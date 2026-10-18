@@ -83,6 +83,12 @@ export interface PlaybackClock {
  */
 export interface StageRequest {
   target: PreviewTarget
+  /**
+   * Where the clip had got to in the pane that asked for the display, or null
+   * when it was not playing there — a display carries on from there rather than
+   * starting the clip over, so that enlarging it is the same clip changing place.
+   */
+  resumeAt: number | null
   from: () => DOMRect | null
   animation: number
 }

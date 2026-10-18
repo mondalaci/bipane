@@ -11,6 +11,7 @@ import { createWorkspace, type Workspace } from '@renderer/composables/useWorksp
 import type { PaneController, PaneEntry } from '@renderer/composables/useDirectory'
 import {
   loadTranscodeSupport,
+  previewKeyFor,
   previewTargetFor,
   type PlaybackClock,
   type StageRequest
@@ -134,10 +135,14 @@ const stageRequest = computed<StageRequest | null>(() => {
   const side = stageSource.value
   if (target === null || side === null) return null
 
+  const asking = side === 'left' ? leftPanel : rightPanel
+  const held = stageResume.value
+
   return {
     target,
     animation: stageAnimation.value,
-    from: () => (side === 'left' ? leftPanel.value : rightPanel.value)?.previewRect() ?? null
+    resumeAt: held !== null && held.key === previewKeyFor(target) ? held.time : null,
+    from: () => asking.value?.previewRect() ?? null
   }
 })
 
@@ -157,17 +162,43 @@ const transferredSide = computed<PanelSide | null>(() =>
 )
 
 /**
+ * Where the clip was playing in the pane that asked for the display, taken when
+ * it asked. It has to be taken *then* rather than read later: the ask is what
+ * takes the element that was playing it away.
+ */
+const stageResume = ref<{ key: string; time: number } | null>(null)
+
+/**
+ * A position belongs to the clip it was taken from and to the request that took
+ * it: once the display has moved on to another clip, it is not carried back.
+ */
+watch(stageTarget, (target) => {
+  const held = stageResume.value
+  if (held !== null && previewKeyFor(target) !== held.key) stageResume.value = null
+})
+
+/**
  * Display the media under the active pane's cursor in the other pane. Pressing
  * Enter again on what is already displayed takes the display away.
  */
 function toggleStage(): void {
-  if (stageSide.value !== null) exitStage()
-  else stageSide.value = activeSide.value === 'left' ? 'right' : 'left'
+  if (stageSide.value !== null) {
+    exitStage()
+    return
+  }
+
+  const side = activeSide.value
+  const asking = side === 'left' ? leftPanel : rightPanel
+  // Taken before the display exists, because the display is what takes the
+  // element that was playing the clip away.
+  stageResume.value = asking.value?.previewPosition() ?? null
+  stageSide.value = side === 'left' ? 'right' : 'left'
 }
 
 function exitStage(): void {
   stageSide.value = null
   displayedClock.value = null
+  stageResume.value = null
 }
 
 /**

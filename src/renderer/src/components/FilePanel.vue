@@ -257,6 +257,24 @@ function onVideoMetadata(event: Event): void {
     sizeHint.value = { width: video.videoWidth, height: video.videoHeight }
   }
   if (previewState.value === 'probing') previewState.value = 'loading'
+
+  resumeFromDisplay(video)
+}
+
+/**
+ * Carry on where the display left off, now that this element knows enough to be
+ * moved — the clip was already part way through there, so playing it from the
+ * beginning again reads as a restart rather than as a hand-back.
+ */
+function resumeFromDisplay(element: HTMLVideoElement): void {
+  const held = handedBack
+  if (held === null || held.key !== previewKeyFor(previewTarget.value)) return
+
+  handedBack = null
+
+  const at = Math.min(held.time, element.duration)
+  if (!Number.isFinite(at) || !canMoveWithin(element, at)) return
+  element.currentTime = at
 }
 
 /** Frames are flowing: the spinner has done its job. */
@@ -546,6 +564,21 @@ async function dismissStage(): Promise<void> {
   emit('stage-clock', null)
 }
 
+/**
+ * Carry on where the pane that asked had got to. The clip was already part way
+ * through there, so a display that began it again would read as a restart rather
+ * than as the same clip changing place.
+ */
+function resumeStage(event: Event): void {
+  const element = event.target
+  const stage = shownStage.value
+  if (!(element instanceof HTMLVideoElement) || !stage || stage.resumeAt === null) return
+
+  const at = Math.min(stage.resumeAt, element.duration)
+  if (!Number.isFinite(at) || !canMoveWithin(element, at)) return
+  element.currentTime = at
+}
+
 function onStageError(): void {
   stageState.value = 'failed'
 }
@@ -660,6 +693,23 @@ const showPlayBar = computed(
 )
 
 /**
+ * Where a clip had got to when a display handed it back — held with the clip it
+ * belongs to, so it can never be applied to a different one. The footer's own
+ * element is created fresh when the clip comes back, and would otherwise start
+ * it over from the beginning.
+ */
+let handedBack: { key: string; time: number } | null = null
+
+watch(
+  () => props.displayedClock,
+  (clock) => {
+    const key = previewKeyFor(previewTarget.value)
+    if (props.transferred !== true || !clock || key === null) return
+    handedBack = { key, time: clock.time }
+  }
+)
+
+/**
  * The clip a display has taken over is played *there*, so this pane asks the file
  * for its length itself: nothing of this pane's own will report one.
  */
@@ -677,6 +727,20 @@ function previewRect(): DOMRect | null {
   const element = previewEl.value
   if (!element || element.offsetParent === null) return null
   return element.getBoundingClientRect()
+}
+
+/**
+ * Where this pane's own preview of the clip has got to, for a display about to
+ * take the clip over — with the clip it belongs to, so that it can never be
+ * carried onto a different one. Null when there is no element (which is what a
+ * pane whose clip is already displayed has) and at the very start, where there
+ * is nothing to carry over.
+ */
+function previewPosition(): { key: string; time: number } | null {
+  const element = previewVideo.value
+  const key = previewKeyFor(previewTarget.value)
+  if (!(element instanceof HTMLVideoElement) || key === null) return null
+  return element.currentTime > 0 ? { key, time: element.currentTime } : null
 }
 
 /**
@@ -699,21 +763,26 @@ function seek(element: HTMLVideoElement | HTMLImageElement | null, delta: number
   const wasEnded = element.ended
   const at = Math.min(Math.max(element.currentTime + delta, 0), duration)
 
-  // The clip has to have somewhere to move *to*. A clip main is still
-  // transcoding arrives as a growing stream, and a stream reports no usable
-  // range — Chromium gives a live source a single empty one — so the keys do
-  // nothing there rather than throwing the playhead back to the start. Once the
-  // encode is done the same clip is served as a whole file, ranges and all, and
-  // the keys work on it.
-  const ranges = element.seekable
-  let reachable = false
-  for (let i = 0; i < ranges.length; i += 1) {
-    if (ranges.end(i) > 0 && at >= ranges.start(i) && at <= ranges.end(i)) reachable = true
-  }
-  if (!reachable) return
+  // The clip has to have somewhere to move *to*, so the keys do nothing on a
+  // clip that cannot be moved within rather than throwing it back to the start.
+  if (!canMoveWithin(element, at)) return
 
   element.currentTime = at
   if (wasEnded && at < duration) void element.play().catch(() => {})
+}
+
+/**
+ * Whether a clip has a real range covering `at`: a clip main is still
+ * transcoding arrives as a growing stream, and a stream has nothing to move
+ * within — Chromium gives a live source a single empty range. Once the encode is
+ * done the same clip is served as a whole file, ranges and all.
+ */
+function canMoveWithin(element: HTMLVideoElement, at: number): boolean {
+  const ranges = element.seekable
+  for (let i = 0; i < ranges.length; i += 1) {
+    if (ranges.end(i) > 0 && at >= ranges.start(i) && at <= ranges.end(i)) return true
+  }
+  return false
 }
 
 function seekPreview(delta: number): void {
@@ -724,7 +793,7 @@ function seekStage(delta: number): void {
   seek(stageMedia.value, delta)
 }
 
-defineExpose({ previewRect, seekPreview, seekStage })
+defineExpose({ previewRect, previewPosition, seekPreview, seekStage })
 
 // Kept out of the <ul> on purpose: the row list must contain exactly the
 // entries, or index-based scrolling and the cursor watch would be off by one.
@@ -1190,6 +1259,7 @@ function onRenameBlur(): void {
           loop
           class="max-h-full max-w-full origin-top-left object-contain"
           :class="stageState === 'ready' ? '' : 'invisible'"
+          @loadedmetadata="resumeStage"
           @loadeddata="onStageShown"
           @timeupdate="readStageClock"
           @durationchange="readStageClock"

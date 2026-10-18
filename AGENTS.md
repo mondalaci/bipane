@@ -309,8 +309,14 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   drawn from the display instead: the displaying pane publishes the clock it is
   playing (`stage-clock`, a `PlaybackClock`) and the pane that asked reads it,
   asking the file itself for a length when the display can only say where it is
-  (a clip still being encoded). Dismissing hands the clip back, and the footer's
-  own element starts it over. With the command line
+  (a clip still being encoded). The position travels with the clip in *both*
+  directions, so enlarging one is the same clip changing place rather than
+  starting over: the ask carries where the footer's own preview had got to
+  (`resumeAt`, taken before the display exists, because the display is what takes
+  that element away), and dismissing hands it back the same way. Each element is
+  created fresh for the hand, so the position is applied as soon as the new one
+  knows enough to be moved — and it is held with the clip it belongs to, so it
+  can never be carried onto a different one. With the command line
   empty the arrow keys are a scrubber for what is showing (`seekPreview` steps
   the footer's clip and, when a display is up, the same clip in the other pane, so
   the two cannot drift apart): stepping back into a clip that had played itself
