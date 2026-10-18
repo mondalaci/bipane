@@ -244,6 +244,22 @@ function seekPreview(delta: number): void {
   showing.value?.seekStage(delta)
 }
 
+/**
+ * Pause or resume the clip being watched: the display's when one is up, since
+ * its pane no longer plays a copy of its own, and the footer's otherwise.
+ * Answers whether there was a clip to toggle, so Space can stay the shell's
+ * space when there is nothing to pause.
+ */
+function togglePlayback(): boolean {
+  if (stageSide.value !== null) {
+    const showing = stageSide.value === 'left' ? leftPanel : rightPanel
+    return showing.value?.toggleStagePlayback() ?? false
+  }
+
+  const active = activeSide.value === 'left' ? leftPanel : rightPanel
+  return active.value?.togglePreviewPlayback() ?? false
+}
+
 const panelHost = ref<HTMLElement | null>(null)
 const terminalRef = ref<InstanceType<typeof TerminalPane> | null>(null)
 
@@ -614,6 +630,16 @@ function handlePaneKey(event: KeyboardEvent): void {
   }
 
   if (event.ctrlKey || event.altKey || event.metaKey) return
+
+  // Space is the clip's play/pause while the command line is empty — the
+  // display's clip, or the footer preview under the cursor. With nothing to
+  // play it stays a space for the shell, so a command can still start with one.
+  if (event.key === ' ' && !event.repeat && !searching && !hasInput) {
+    if (togglePlayback()) {
+      consume(event)
+      return
+    }
+  }
 
   if (event.key === 'Escape') {
     consume(event)

@@ -451,6 +451,91 @@ let stageSound = 0
 let stageToken = 0
 
 /**
+ * The enlarged clip's position and length, for the full-width play bar under it.
+ * A clip main has to encode is a live stream and cannot report a length, so the
+ * file itself is asked — separately from the footer's own query, since this pane
+ * may be previewing a different row.
+ */
+const stageTime = ref(0)
+const stageDuration = ref<number | null>(null)
+const stageClipLength = ref<number | null>(null)
+let stageClipLengthKey: string | null = null
+
+/** The displayed video's own aspect, which the bar's width follows. */
+const stageVideoAspect = ref<number | null>(null)
+
+/**
+ * Where the stream the display is *playing* was started, as opposed to where the
+ * next one will be asked for. A stream counts from zero, so the clip's position
+ * is this origin plus the element's own clock — and changing `stageFrom` while
+ * the old element is still playing must not move the bar with it.
+ */
+const stageStreamOrigin = ref(0)
+
+/** Whether a stream has been asked for again and its element has not caught up yet. */
+let stageSeekPending = false
+
+/**
+ * Where a clip Chromium plays was just asked to go. A seek is asynchronous, so
+ * for the moment before the element catches up its clock still reports the old
+ * position — which would snap the bar back right after the user let go of it.
+ * The bar holds where it was dropped until the element agrees (or the backstop
+ * expires, for a seek that never lands exactly).
+ */
+let stageSeekHold: number | null = null
+let stageSeekHoldTimer: number | null = null
+
+function holdStageSeek(position: number): void {
+  stageSeekHold = position
+  if (stageSeekHoldTimer !== null) window.clearTimeout(stageSeekHoldTimer)
+  stageSeekHoldTimer = window.setTimeout(() => {
+    stageSeekHold = null
+    stageSeekHoldTimer = null
+  }, 1000)
+}
+
+function releaseStageSeek(): void {
+  stageSeekHold = null
+  if (stageSeekHoldTimer !== null) {
+    window.clearTimeout(stageSeekHoldTimer)
+    stageSeekHoldTimer = null
+  }
+}
+
+/**
+ * A right-button scrub is not a click. Some platforms still deliver a click
+ * when that button is released, so for a moment after a scrub the display's
+ * play/pause handler ignores one — the wheel's ten-minute step must not also
+ * toggle the clip.
+ */
+let stageClickSuppressedUntil = 0
+
+/** The drag in flight on the enlarged play bar. */
+let stageScrub: { length: number; stream: boolean; pending: number } | null = null
+
+/** Whether the play bar is being dragged, so its handle stays visible. */
+const stageScrubbing = ref(false)
+
+/** Whether the displayed clip is playing, for the button that pauses it. */
+const stagePlaying = ref(false)
+
+/** Put the display's clock back to nothing, for a new clip or for leaving the mode. */
+function clearStageClock(): void {
+  stageTime.value = 0
+  stageDuration.value = null
+  stageClipLength.value = null
+  stageClipLengthKey = null
+  stageStreamOrigin.value = 0
+  stageSeekPending = false
+  releaseStageSeek()
+  stageClickSuppressedUntil = 0
+  stageScrub = null
+  stageScrubbing.value = false
+  stagePlaying.value = false
+  stageVideoAspect.value = null
+}
+
+/**
  * Blur the pane's own content while this pane is the display, and bring it back
  * into focus when the mode is left. It is the *mode* that blurs rather than the
  * media: navigating from a media file to an ordinary one empties the display for
@@ -495,6 +580,9 @@ watch(
       // A clip main has to encode is asked for from where the mode began; a clip
       // Chromium plays is loaded as it is and moved to that position.
       stageFrom.value = stage.resumeAt ?? 0
+      clearStageClock()
+      stageTime.value = stageFrom.value
+      stageStreamOrigin.value = stageFrom.value
       raiseStageSound()
       void loadStage(stage)
       return
@@ -521,6 +609,7 @@ watch(
     stageDismissal = null
     shownStage.value = null
     stageState.value = 'idle'
+    clearStageClock()
     emit('stage-clock', null)
   },
   { immediate: true }
@@ -667,6 +756,7 @@ async function runDismissal(): Promise<void> {
   if (stage === null || element === null) {
     shownStage.value = null
     stageState.value = 'idle'
+    clearStageClock()
     emit('stage-clock', null)
     return
   }
@@ -703,6 +793,7 @@ async function runDismissal(): Promise<void> {
 
   shownStage.value = null
   stageState.value = 'idle'
+  clearStageClock()
   emit('stage-clock', null)
 }
 
@@ -716,11 +807,47 @@ function resumeStage(event: Event): void {
   const stage = shownStage.value
   if (!(element instanceof HTMLVideoElement) || !stage) return
 
+  // This element was started at the offset its URL carries, and it is now the
+  // one the bar must count from.
+  stageStreamOrigin.value = stageFrom.value
+  stageSeekPending = false
+  if (element.videoWidth > 0 && element.videoHeight > 0) {
+    stageVideoAspect.value = element.videoWidth / element.videoHeight
+  }
   pickUpAt(element, previewKeyFor(stage.target), stage.resumeAt)
 }
 
 function onStageError(): void {
   stageState.value = 'failed'
+}
+
+/**
+ * A left click on the enlarged clip itself, or on its play/pause button: pause
+ * it, or play it again. Only the primary button is a click here — releasing the
+ * right button after a wheel scrub must not count as one.
+ */
+function onStageVideoClick(event: MouseEvent): void {
+  if (event.button !== 0) return
+  if (performance.now() < stageClickSuppressedUntil) return
+  togglePlayback(stageMedia.value)
+}
+
+/** Pause or resume one video, answering whether there was one to toggle. */
+function togglePlayback(element: HTMLImageElement | HTMLVideoElement | null): boolean {
+  if (!(element instanceof HTMLVideoElement)) return false
+  if (element.paused) void element.play().catch(() => {})
+  else element.pause()
+  return true
+}
+
+/** Space: the clip this pane is displaying, when there is one. */
+function toggleStagePlayback(): boolean {
+  return togglePlayback(stageMedia.value)
+}
+
+/** Space without a display: the footer's own preview of the cursor's clip. */
+function togglePreviewPlayback(): boolean {
+  return togglePlayback(previewVideo.value)
 }
 
 /**
@@ -784,6 +911,19 @@ function ensureClipLength(target: PreviewTarget): void {
   })
 }
 
+/** The length of a displayed clip main has to encode, asked of the file once. */
+function ensureStageLength(target: PreviewTarget): void {
+  if (!needsTranscode(target.name)) return
+
+  const key = previewKeyFor(target)
+  if (key === null || key === stageClipLengthKey) return
+  stageClipLengthKey = key
+  void window.bipane.fs.videoDuration(target.path).then((seconds) => {
+    if (stageClipLengthKey !== key) return
+    stageClipLength.value = seconds
+  })
+}
+
 /**
  * Follow the footer's clip for the play bar beside its thumbnail.
  */
@@ -824,10 +964,27 @@ function readStageClock(): void {
   }
   const clock = clockOf(element)
   const stream = isStream(element)
-  emit('stage-clock', {
-    time: (stream ? stageFrom.value : 0) + clock.time,
-    length: stream ? null : clock.length
-  })
+  // A stream counts from the origin it was started at, which is not the offset
+  // the next stream will be asked for once the bar seeks it again.
+  const time = (stream ? stageStreamOrigin.value : 0) + clock.time
+  const length = stream ? null : clock.length
+
+  // A seek still in flight reported the old position: once the element has
+  // reached where it was sent, the hold has done its job.
+  if (stageSeekHold !== null && Math.abs(time - stageSeekHold) < 0.35) releaseStageSeek()
+
+  emit('stage-clock', { time: stageSeekHold ?? time, length })
+
+  // The bar being dragged is the thing showing the position, a stream that has
+  // been asked for again has not caught up with it yet, and a clip being seeked
+  // is held where it was dropped until the element agrees.
+  if (stageScrub === null && stageSeekHold === null && !(stream && stageSeekPending)) {
+    stageTime.value = time
+  }
+  if (!stream) stageDuration.value = length
+
+  const target = shownStage.value?.target
+  if (length === null && target) ensureStageLength(target)
 }
 
 /**
@@ -981,7 +1138,17 @@ function seek(element: HTMLVideoElement | HTMLImageElement | null, delta: number
     const onStage = element === stageMedia.value
     const wanted = Math.max(0, (onStage ? stageFrom.value : footerFrom.value) + element.currentTime + delta)
     if (onStage) {
-      stageFrom.value = wanted
+      // Asking for the origin the stream already starts at would change nothing
+      // to load; move within what is playing instead.
+      if (!stageSeekPending && wanted === stageStreamOrigin.value) {
+        const at = wanted - stageStreamOrigin.value
+        if (canMoveWithin(element, at)) element.currentTime = at
+      } else {
+        stageSeekPending = true
+        stageFrom.value = wanted
+      }
+      // The bar keeps showing where the clip is being taken while it reloads.
+      stageTime.value = wanted
     } else {
       footerFrom.value = wanted
       // The bar keeps showing where the clip is being taken while it reloads.
@@ -992,6 +1159,7 @@ function seek(element: HTMLVideoElement | HTMLImageElement | null, delta: number
   }
 
   element.currentTime = at
+  if (element === stageMedia.value) holdStageSeek(at)
   if (wasEnded && at < duration) void element.play().catch(() => {})
 }
 
@@ -1015,6 +1183,191 @@ function seekPreview(delta: number): void {
 
 function seekStage(delta: number): void {
   seek(stageMedia.value, delta)
+}
+
+/**
+ * The enlarged clip's length: what its own element reports for a whole file, and
+ * the file's own length for one main has to encode — its live stream can only
+ * say what is left of the clip.
+ */
+const stagePlayLength = computed(() => stageClipLength.value ?? stageDuration.value)
+
+/** How much of the enlarged clip the bar has filled. */
+const stageProgress = computed(() => {
+  const length = stagePlayLength.value
+  if (length === null || length <= 0) return '0%'
+  const ratio = Math.min(Math.max(stageTime.value / length, 0), 1)
+  return `${(ratio * 100).toFixed(2)}%`
+})
+
+/** The handle's position, held inside the track at both ends rather than half over it. */
+const stageThumbLeft = computed(
+  () => `clamp(6px, ${stageProgress.value}, calc(100% - 6px))`
+)
+
+/**
+ * The media area and the video's own box. The bar under a clip has to be as wide
+ * as the picture, not the pane, so the video is laid out at the size its aspect
+ * allows inside the area and the bar shares that width. Both are measured,
+ * because the pane can be resized at any moment.
+ */
+const stageArea = ref<HTMLElement | null>(null)
+const stageBarEl = ref<HTMLElement | null>(null)
+const stageAreaSize = ref<PixelSize | null>(null)
+const stageBarHeight = ref(0)
+
+/** The breathing room between the clip and the bar under it. */
+const STAGE_BAR_GAP = 0
+
+let stageAreaObserver: ResizeObserver | null = null
+let stageBarObserver: ResizeObserver | null = null
+
+function measureStageArea(element: HTMLElement | null): void {
+  stageAreaObserver?.disconnect()
+  stageAreaObserver = null
+  stageAreaSize.value = null
+  if (!element) return
+
+  const measure = (): void => {
+    stageAreaSize.value = { width: element.clientWidth, height: element.clientHeight }
+  }
+  stageAreaObserver = new ResizeObserver(measure)
+  stageAreaObserver.observe(element)
+  measure()
+}
+
+function measureStageBar(element: HTMLElement | null): void {
+  stageBarObserver?.disconnect()
+  stageBarObserver = null
+  stageBarHeight.value = 0
+  if (!element) return
+
+  const measure = (): void => {
+    stageBarHeight.value = element.offsetHeight
+  }
+  stageBarObserver = new ResizeObserver(measure)
+  stageBarObserver.observe(element)
+  measure()
+}
+
+watch(stageArea, measureStageArea)
+watch(stageBarEl, measureStageBar)
+
+/**
+ * The video's box: its aspect fitted into the media area with room kept for the
+ * bar, so the bar beneath it is exactly as wide as the picture.
+ */
+const stageVideoSize = computed(() => {
+  const area = stageAreaSize.value
+  const aspect = stageVideoAspect.value
+  if (area === null || aspect === null || aspect <= 0) return null
+
+  const height = Math.max(1, area.height - stageBarHeight.value - STAGE_BAR_GAP)
+  const width = Math.max(1, Math.min(area.width, height * aspect))
+  return { width, height: width / aspect }
+})
+
+const stageColumnStyle = computed(() => {
+  const size = stageVideoSize.value
+  return size === null ? { width: '100%' } : { width: `${Math.round(size.width)}px` }
+})
+
+const stageVideoStyle = computed(() => {
+  const size = stageVideoSize.value
+  return size === null ? { height: '100%' } : { height: `${Math.round(size.height)}px` }
+})
+
+/** How far along the bar a pointer is, from 0 to 1. */
+function stageRatioAt(event: PointerEvent): number {
+  const bar = event.currentTarget
+  if (!(bar instanceof HTMLElement)) return 0
+  const rect = bar.getBoundingClientRect()
+  if (rect.width <= 0) return 0
+  return Math.min(Math.max((event.clientX - rect.left) / rect.width, 0), 1)
+}
+
+/**
+ * Move the enlarged clip to `position`. A clip Chromium plays is seeked where it
+ * stands, frame by frame while the bar is dragged; one main has to encode is a
+ * live stream, so its position is held for the reload on release rather than
+ * asking for a new encode for every pixel the pointer crosses.
+ */
+function scrubStageTo(
+  position: number,
+  settle: boolean,
+  stream = stageScrub?.stream === true
+): void {
+  const element = stageMedia.value
+  const target = shownStage.value?.target
+  if (!(element instanceof HTMLVideoElement) || !target) return
+
+  const length = stagePlayLength.value
+  const wanted = Math.max(0, length === null ? position : Math.min(position, length))
+  stageTime.value = wanted
+
+  if (stream) {
+    if (!settle) return
+    // A stream that already starts here is still the one playing: there is
+    // nothing to reload, only a position within what it has. Without this, a
+    // drag back to the origin would wait for a reload that never comes.
+    if (!stageSeekPending && wanted === stageStreamOrigin.value) {
+      const at = wanted - stageStreamOrigin.value
+      if (canMoveWithin(element, at)) element.currentTime = at
+      return
+    }
+    stageSeekPending = true
+    stageFrom.value = wanted
+    return
+  }
+
+  const duration = element.duration
+  if (!Number.isFinite(duration) || duration <= 0) return
+  const wasEnded = element.ended
+  const at = Math.min(wanted, duration)
+  element.currentTime = at
+  // Hold the bar where it was dropped until the element has really moved there,
+  // or it would flash back to the old position for the length of the seek.
+  if (settle) holdStageSeek(at)
+  if (wasEnded && at < duration) void element.play().catch(() => {})
+}
+
+function onStageBarPointerDown(event: PointerEvent): void {
+  if (event.button !== 0) return
+
+  const element = stageMedia.value
+  const length = stagePlayLength.value
+  if (!(element instanceof HTMLVideoElement) || length === null || length <= 0) return
+
+  event.preventDefault()
+  event.stopPropagation()
+
+  const bar = event.currentTarget
+  if (bar instanceof HTMLElement) bar.setPointerCapture(event.pointerId)
+
+  const wanted = stageRatioAt(event) * length
+  stageScrub = { length, stream: isStream(element), pending: wanted }
+  stageScrubbing.value = true
+  scrubStageTo(wanted, false)
+}
+
+function onStageBarPointerMove(event: PointerEvent): void {
+  if (stageScrub === null) return
+  stageScrub.pending = stageRatioAt(event) * stageScrub.length
+  scrubStageTo(stageScrub.pending, false)
+}
+
+function onStageBarPointerUp(event: PointerEvent): void {
+  const scrub = stageScrub
+  if (scrub === null) return
+  stageScrub = null
+  stageScrubbing.value = false
+
+  const bar = event.currentTarget
+  if (bar instanceof HTMLElement && bar.hasPointerCapture(event.pointerId)) {
+    bar.releasePointerCapture(event.pointerId)
+  }
+
+  scrubStageTo(scrub.pending, true, scrub.stream)
 }
 
 /**
@@ -1059,48 +1412,85 @@ function onFooterWheel(event: WheelEvent): void {
 }
 
 /**
- * Whether a right press is down on the display, and whether it has scrubbed the
- * clip since: a right press that scrolls is the wheel's ten-minute step, not a
- * click, so the release must not read it as one.
+ * Whether the current press has wheel-scrubbed the clip, and when the right
+ * press went down. A press that scrolls is the wheel's step rather than a
+ * click: the left button's release would otherwise reach the picture as an
+ * ordinary click, and a right press that is held or scrolls is not the quick
+ * click that leaves the mode.
  */
+let leftScrubbed = false
 let rightPress = false
+let rightDownAt = 0
 let rightScrubbed = false
 
+/** How quick a right press must be to count as the click that leaves the mode. */
+const RIGHT_CLICK_MS = 300
+
 function onStageWheel(event: WheelEvent): void {
-  if (wheelScrub(event, stageMedia.value) && (event.buttons & 2) !== 0) rightScrubbed = true
+  if (!wheelScrub(event, stageMedia.value)) return
+  // A wheel turned while a button is down is part of that press's gesture, so
+  // its release must not leave the mode or count as a click — whatever
+  // `buttons` the platform reports for a wheel event. The held button also
+  // picks the step.
+  if (rightPress || (event.buttons & 2) !== 0) rightScrubbed = true
+  if ((event.buttons & 1) !== 0) leftScrubbed = true
 }
 
 /**
  * A left-click on the footer's thumbnail — the mouse's Enter: show this pane's
  * media at full size in the other one.
  */
-function onPreviewClick(): void {
+function onPreviewClick(event: MouseEvent): void {
+  if (event.button !== 0) return
   emit('stage-on')
 }
 
 /**
  * Mouse events on the pane that is displaying the other pane's media. They stop
- * here so a click cannot reach the listing blurred behind them. A right-click
- * leaves the mode — the mouse's Escape — but only when it was a click: a right
- * press that scrolls is the wheel's ten-minute step, so a scrub while the button
- * is held suppresses the release's exit.
+ * here so a click cannot reach the listing blurred behind them. A quick
+ * right-click leaves the mode — the mouse's Escape — but a press that scrolls
+ * is the wheel's ten-minute step, and one held for longer is not a click at
+ * all, so neither leaves.
  */
 function onStagePointerDown(event: MouseEvent): void {
   event.stopPropagation()
+  if (event.button === 0) {
+    leftScrubbed = false
+    return
+  }
   if (event.button !== 2) return
   rightPress = true
+  rightDownAt = performance.now()
   rightScrubbed = false
 }
 
 function onStagePointerUp(event: MouseEvent): void {
+  if (event.button === 0) {
+    // A left press that wheel-scrubbed is a seek, not the click that pauses.
+    if (leftScrubbed) stageClickSuppressedUntil = performance.now() + 300
+    leftScrubbed = false
+    return
+  }
   if (event.button !== 2) return
-  const leave = rightPress && !rightScrubbed
+  const scrubbed = rightScrubbed
+  const quick = performance.now() - rightDownAt <= RIGHT_CLICK_MS
+  const leave = rightPress && !scrubbed && quick
   rightPress = false
   rightScrubbed = false
+  // A right-button release is never a click on the picture or its play/pause
+  // button, however the platform reports the gesture that followed it.
+  stageClickSuppressedUntil = performance.now() + 300
   if (leave) emit('stage-off')
 }
 
-defineExpose({ previewRect, previewPosition, seekPreview, seekStage })
+defineExpose({
+  previewRect,
+  previewPosition,
+  seekPreview,
+  seekStage,
+  toggleStagePlayback,
+  togglePreviewPlayback
+})
 
 // Kept out of the <ul> on purpose: the row list must contain exactly the
 // entries, or index-based scrolling and the cursor watch would be off by one.
@@ -1181,6 +1571,11 @@ onMounted(() => {
 onBeforeUnmount(() => {
   listObserver?.disconnect()
   listObserver = null
+  stageAreaObserver?.disconnect()
+  stageAreaObserver = null
+  stageBarObserver?.disconnect()
+  stageBarObserver = null
+  releaseStageSeek()
   cancelPreviewRead()
   window.removeEventListener('mouseup', endPainting)
 })
@@ -1546,42 +1941,121 @@ function onRenameBlur(): void {
       @contextmenu.prevent
       @wheel="onStageWheel"
     >
-      <div v-if="shownStage" class="relative flex min-h-0 grow items-center justify-center p-3">
-        <img
-          v-if="showStageImage"
-          ref="stageMedia"
-          :src="stageFrame ?? undefined"
-          alt=""
-          draggable="false"
-          class="h-full w-full origin-top-left object-contain"
-          :class="stageState === 'ready' ? '' : 'invisible'"
-          @load="onStageShown"
-          @error="onStageError"
-        />
-        <!-- A display is for watching rather than glancing at, so the clip plays
-             on and on here with its sound — the element stays muted until the
-             reveal has it fade up, and a failure to load leaves it silent. The
-             footer's own thumbnail is the one that plays once, and silently. -->
-        <video
-          v-else-if="showStageVideo"
-          ref="stageMedia"
-          :src="stageVideoUrl ?? undefined"
-          muted
-          autoplay
-          loop
-          class="h-full w-full origin-top-left object-contain"
-          :class="stageState === 'ready' ? '' : 'invisible'"
-          @loadedmetadata="resumeStage"
-          @loadeddata="onStageShown"
-          @timeupdate="readStageClock"
-          @seeked="readStageClock"
-          @ended="readStageClock"
-          @error="onStageError"
-        ></video>
-        <span
-          v-if="stageState === 'loading'"
-          class="absolute h-5 w-5 animate-spin rounded-full border-2 border-fg border-t-transparent"
-        />
+      <div v-if="shownStage" class="flex min-h-0 grow flex-col p-3">
+        <div ref="stageArea" class="relative flex min-h-0 grow items-center justify-center">
+          <div
+            v-if="showStageVideo"
+            class="flex min-h-0 flex-col items-stretch"
+            :style="stageColumnStyle"
+          >
+            <!-- A display is for watching rather than glancing at, so the clip
+                 plays on and on here with its sound — the element stays muted
+                 until the reveal has it fade up, and a failure to load leaves it
+                 silent. The footer's own thumbnail is the one that plays once,
+                 and silently. A click on the picture itself pauses or resumes. -->
+            <video
+              ref="stageMedia"
+              :src="stageVideoUrl ?? undefined"
+              muted
+              autoplay
+              loop
+              class="w-full min-h-0 origin-top-left object-contain"
+              :class="stageState === 'ready' ? '' : 'invisible'"
+              :style="stageVideoStyle"
+              @loadedmetadata="resumeStage"
+              @loadeddata="onStageShown"
+              @timeupdate="readStageClock"
+              @seeked="readStageClock"
+              @ended="readStageClock"
+              @play="stagePlaying = true"
+              @pause="stagePlaying = false"
+              @click="onStageVideoClick"
+              @error="onStageError"
+            ></video>
+
+            <!-- The clip's transport, as wide as the picture above it: a
+                 play/pause button, a position, a full-width track and a length.
+                 The track itself is thin, but its hit area is the whole row, so
+                 it is easy to grab and drag. -->
+            <div
+              ref="stageBarEl"
+              class="shrink-0 border-t border-border-subtle bg-surface px-2 py-2"
+            >
+              <div class="flex select-none items-center gap-2 tabular-nums text-ui-sm text-fg-dim">
+                <button
+                  type="button"
+                  class="flex h-6 w-6 shrink-0 items-center justify-center rounded text-fg-dim transition-colors hover:bg-hover hover:text-fg"
+                  :aria-label="stagePlaying ? 'Pause' : 'Play'"
+                  @click="onStageVideoClick"
+                >
+                  <svg
+                    v-if="stagePlaying"
+                    viewBox="0 0 24 24"
+                    class="h-3.5 w-3.5"
+                    fill="currentColor"
+                    aria-hidden="true"
+                  >
+                    <path d="M7 5h4v14H7zM14 5h4v14h-4z" />
+                  </svg>
+                  <svg
+                    v-else
+                    viewBox="0 0 24 24"
+                    class="h-3.5 w-3.5"
+                    fill="currentColor"
+                    aria-hidden="true"
+                  >
+                    <path d="M8 5v14l11-7z" />
+                  </svg>
+                </button>
+                <span class="shrink-0">{{ formatDuration(stageTime) }}</span>
+                <div
+                  class="group relative flex h-6 min-w-0 flex-1 cursor-pointer touch-none items-center"
+                  role="slider"
+                  aria-label="Clip position"
+                  :aria-valuemin="0"
+                  :aria-valuemax="stagePlayLength ?? 0"
+                  :aria-valuenow="stageTime"
+                  @pointerdown="onStageBarPointerDown"
+                  @pointermove="onStageBarPointerMove"
+                  @pointerup="onStageBarPointerUp"
+                  @pointercancel="onStageBarPointerUp"
+                >
+                  <span class="h-1.5 w-full overflow-hidden rounded-full bg-border">
+                    <span
+                      class="block h-full rounded-full bg-accent-strong"
+                      :style="{ width: stageProgress }"
+                    />
+                  </span>
+                  <span
+                    class="pointer-events-none absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border border-surface bg-accent-strong transition-opacity"
+                    :class="stageScrubbing ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'"
+                    :style="{ left: stageThumbLeft }"
+                  />
+                </div>
+                <span class="shrink-0">
+                  {{ stagePlayLength !== null ? formatDuration(stagePlayLength) : '--:--' }}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <img
+            v-else-if="showStageImage"
+            ref="stageMedia"
+            :src="stageFrame ?? undefined"
+            alt=""
+            draggable="false"
+            class="h-full w-full origin-top-left object-contain"
+            :class="stageState === 'ready' ? '' : 'invisible'"
+            @load="onStageShown"
+            @error="onStageError"
+          />
+
+          <span
+            v-if="stageState === 'loading'"
+            class="absolute h-5 w-5 animate-spin rounded-full border-2 border-fg border-t-transparent"
+          />
+        </div>
       </div>
 
       <!-- The row the cursor is on has nothing to show: what this pane is, and

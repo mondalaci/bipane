@@ -93,7 +93,9 @@ a minute back/forward while `Ctrl+H`/`Ctrl+;` step it by ten minutes — all onl
 while the command line is empty; with anything typed there — or in an open search
 box — the arrows are the line's own keys again and the Ctrl steps belong to the
 shell, whose `Ctrl+H` is backspace, `Ctrl+L` clear-screen and `Ctrl+J`
-accept-line), `Enter` descends or opens with the system default app — except on an image or a
+accept-line; `Space` pauses or resumes the clip being watched there — the
+display's, or the footer preview if none is up — and stays the shell's own space
+when there is no clip to toggle), `Enter` descends or opens with the system default app — except on an image or a
 video, which it displays in the other pane instead (see below), `F3` opens a regular file
 read-only in the Monaco viewer, `F4` opens it for editing with Ctrl+S to save (a
 directory still descends on `F3`), `Insert` marks the current entry and moves down,
@@ -296,8 +298,15 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   belongs to the *mode*, not to whatever is being shown: on a row there is
   nothing to display for, the display empties but the pane stays blurred and
   covered — saying so, and how to leave (`Preview mode` / `Esc to exit`) — and
-  coming back to a media file fills it again. The display itself carries no chrome, not even the file's name,
-  so the media is all there is to look at. What the screen shows is *derived* from the browser's cursor
+  coming back to a media file fills it again. The display itself carries no
+  chrome, not even the file's name, so the media is all there is to look at —
+  except a video's play bar directly beneath it, exactly as wide as the picture,
+  with a play/pause button, its position and its length. The whole row is the
+  seek target, so it is grabbable with the mouse: clicking or dragging scrubs
+  the clip (a clip main must encode is re-asked from the dropped position,
+  rather than re-encoding per pixel). A left click on the picture itself pauses
+  or resumes it, as does `Space` while the command line is empty. What the
+  screen shows is *derived* from the browser's cursor
   (`stageTarget` in `App.vue`), not pushed to it, which is what makes navigating
   update it for free; leaving media for an ordinary row empties the screen
   instead of freezing the last picture. `Tab` is claimed while a display is up —
@@ -306,8 +315,9 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   tabs or closing one leaves the mode too, since the panes it belonged to are
   gone. The mouse makes the same two gestures: a left-click on the footer
   thumbnail asks for the display when one is not already up (`stage-on` →
-  `showStage`), and a right-click on the pane showing it leaves the mode
-  (`stage-off` → `exitStage`) — the mouse's `Enter` and `Escape`. A display's
+  `showStage`), and a quick right-click on the pane showing it leaves the mode
+  (`stage-off` → `exitStage`) — the mouse's `Enter` and `Escape`; a held right
+  press, or one that wheel-scrubs the clip, is not that click. A display's
   media fills the pane however small the file is
   (`h-full w-full object-contain`), upscaled as far as its own aspect allows, so
   a 320x240 camcorder clip is not a postage stamp in the middle of it. The reveal
