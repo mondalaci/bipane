@@ -210,6 +210,20 @@ function activateRow(side: PanelSide, again: boolean): void {
 }
 
 /**
+ * Step the pane a display is showing for, by `delta` rows — the wheel in the
+ * display, outside the media it is showing. The display follows the cursor it is
+ * showing for on its own, so this is the whole of it: a way of flicking through a
+ * folder without leaving the mode, or taking a hand off the keyboard.
+ */
+function stepShownPane(delta: number): void {
+  const side = stageSource.value
+  if (side === null) return
+
+  const pane = side === 'left' ? left.value : right.value
+  pane.moveCursor(delta)
+}
+
+/**
  * Put `side`'s preview up in the other pane — clicking its thumbnail, or
  * double-clicking the row, the mouse's ways of the gesture Enter makes. Only ever
  * turns the display on: one already up is left alone, since leaving the mode has
@@ -1029,6 +1043,7 @@ onBeforeUnmount(() => {
           @select="setActive('left')"
           @pointer-down="focusPanes"
           @activate="activateRow('left', false)"
+          @step="stepShownPane"
           @stage-clock="displayedClock = $event"
           @stage-on="showStage('left')"
           @stage-off="exitStage()"
@@ -1086,6 +1101,7 @@ onBeforeUnmount(() => {
           @select="setActive('right')"
           @pointer-down="focusPanes"
           @activate="activateRow('right', false)"
+          @step="stepShownPane"
           @stage-clock="displayedClock = $event"
           @stage-on="showStage('right')"
           @stage-off="exitStage()"

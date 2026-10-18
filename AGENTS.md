@@ -392,9 +392,19 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   out plays on from there, and stepping past its end stops there — the end of a
   clip is not quietly its beginning again. The wheel over a clip is a scrubber
   too (`wheelScrub` in `FilePanel`): a plain wheel steps it ten seconds, the
-  left button held a minute and the right button ten — wheel-up forward — and it
-  is bound to the media box and the display rather than the whole pane, so the
-  wheel over the listing still scrolls the listing.
+  left button held a minute and the right button ten — wheel-up forward — and in
+  a footer it is bound to the media box rather than the whole pane, so the
+  wheel over the listing still scrolls the listing. In the *display* the media box
+  is not the element (`overStageMedia`): the wheel is measured against the
+  picture's own rectangle — an image's element is the whole stage with the picture
+  letterboxed inside it — and against the transport directly under it, so a wheel
+  on the picture or the bar seeks, while one anywhere else in the pane — the
+  letterbox, the padding, an emptied display — steps the *folder being browsed*
+  instead: one row a notch, up for the row above and down for the one below, which
+  a display follows on its own. That is a way of flicking through what a display
+  is showing without leaving the mode, and a wheel turned with a button held is
+  part of that press's gesture here too, so its release neither leaves the mode
+  nor counts as a click.
 - **A clip Chromium cannot play is transcoded, when ffmpeg is there to do it.**
   Chromium has no demuxer for AVI or ASF, and no decoder for the motion JPEG of
   an old camcorder AVI or the WMV3/VC-1 of an ASF one — `canPlayType` answers no

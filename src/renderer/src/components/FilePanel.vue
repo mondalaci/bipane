@@ -48,6 +48,8 @@ const emit = defineEmits<{
   (event: 'select'): void
   (event: 'pointer-down'): void
   (event: 'activate'): void
+  /** A wheel outside the media: step the pane the display is showing for, by `delta` rows. */
+  (event: 'step', delta: number): void
   (event: 'stage-clock', clock: PlaybackClock | null): void
   (event: 'stage-on'): void
   (event: 'stage-off'): void
@@ -1437,14 +1439,63 @@ let rightScrubbed = false
 /** How quick a right press must be to count as the click that leaves the mode. */
 const RIGHT_CLICK_MS = 300
 
-function onStageWheel(event: WheelEvent): void {
-  if (!wheelScrub(event, stageMedia.value)) return
-  // A wheel turned while a button is down is part of that press's gesture, so
-  // its release must not leave the mode or count as a click — whatever
-  // `buttons` the platform reports for a wheel event. The held button also
-  // picks the step.
+/**
+ * A wheel turned while a button is down is part of that press's gesture, so its
+ * release must not leave the mode or count as a click — whatever `buttons` the
+ * platform reports for a wheel event. Which button is held is `wheelScrub`'s
+ * business, not this: it picks the size of the step.
+ */
+function noteWheelPress(event: WheelEvent): void {
   if (rightPress || (event.buttons & 2) !== 0) rightScrubbed = true
   if ((event.buttons & 1) !== 0) leftScrubbed = true
+}
+
+/**
+ * Whether a wheel is over what the display is showing rather than over the pane
+ * around it: the picture's own rectangle — for an image the element is the whole
+ * stage with the picture letterboxed inside it, so this is `drawnRect`, not the
+ * element's box — and the transport that belongs to a clip, directly beneath the
+ * picture and exactly as wide as it, which is where a wheel is expected to seek.
+ */
+function overStageMedia(event: WheelEvent): boolean {
+  const media = stageMedia.value
+  if (media === null) return false
+
+  const within = (box: DOMRect | null): boolean =>
+    box !== null &&
+    event.clientX >= box.left &&
+    event.clientX <= box.right &&
+    event.clientY >= box.top &&
+    event.clientY <= box.bottom
+
+  const bar = stageBarEl.value
+  return (
+    within(drawnRect(media) ?? media.getBoundingClientRect()) ||
+    within(bar === null ? null : bar.getBoundingClientRect())
+  )
+}
+
+/**
+ * The wheel in the display. Over the media it is the scrubber it has always been:
+ * a clip steps through what is playing, and an image has nothing to move within.
+ * Anywhere else in the pane — the letterbox around a picture, the padding, an
+ * emptied display — there is nothing of the clip under the pointer, so there the
+ * wheel is a way of flicking through the folder being browsed instead: up for the
+ * row above, down for the one below, which the display follows on its own.
+ */
+function onStageWheel(event: WheelEvent): void {
+  if (overStageMedia(event)) {
+    if (!wheelScrub(event, stageMedia.value)) return
+    noteWheelPress(event)
+    return
+  }
+
+  if (event.deltaY === 0) return
+
+  event.preventDefault()
+  event.stopPropagation()
+  noteWheelPress(event)
+  emit('step', event.deltaY < 0 ? -1 : 1)
 }
 
 /**
