@@ -263,6 +263,71 @@ function togglePlayback(): boolean {
 const panelHost = ref<HTMLElement | null>(null)
 const terminalRef = ref<InstanceType<typeof TerminalPane> | null>(null)
 
+/**
+ * Where the two panes meet, as the left pane's share of the row. The line
+ * between them is a handle rather than a fixed border, so dragging it moves the
+ * boundary; it belongs to the window's layout and not to a workspace, so it
+ * survives a tab switch like the title bar does. Both panes are `flex-1` (an
+ * equal basis of zero), so weighting their grow is the whole of the sizing.
+ */
+const DEFAULT_SPLIT = 0.5
+
+/** Keep a sliver of either pane, so the handle can always be found again. */
+const MIN_SPLIT = 0.15
+const MAX_SPLIT = 0.85
+
+/** A drag that ends this near the middle reads as centred, so the handle snaps. */
+const SPLIT_SNAP = 0.02
+
+const splitRatio = ref(DEFAULT_SPLIT)
+
+/** Off-centre is what puts the re-centre button on the handle. */
+const splitCentered = computed(() => splitRatio.value === DEFAULT_SPLIT)
+
+function clampSplit(ratio: number): number {
+  return Math.min(MAX_SPLIT, Math.max(MIN_SPLIT, ratio))
+}
+
+function centerSplit(): void {
+  splitRatio.value = DEFAULT_SPLIT
+}
+
+/**
+ * Drag the boundary. The move is measured against the row's width rather than
+ * the pane's, so the handle keeps up with the pointer wherever the split
+ * currently is. The listeners are on the window, not the handle: the pointer
+ * leaves a one-pixel line immediately, and it is the drag — not the element —
+ * that owns the gesture until the button is released.
+ */
+function startSplitDrag(event: PointerEvent): void {
+  if (event.button !== 0) return
+  const host = panelHost.value
+  if (!host) return
+  const span = host.getBoundingClientRect().width
+  if (span <= 0) return
+
+  event.preventDefault()
+  const startX = event.clientX
+  const startRatio = splitRatio.value
+
+  const move = (moveEvent: PointerEvent): void => {
+    const ratio = clampSplit(startRatio + (moveEvent.clientX - startX) / span)
+    splitRatio.value = Math.abs(ratio - DEFAULT_SPLIT) <= SPLIT_SNAP ? DEFAULT_SPLIT : ratio
+  }
+
+  const finish = (): void => {
+    window.removeEventListener('pointermove', move)
+    window.removeEventListener('pointerup', finish)
+    window.removeEventListener('pointercancel', finish)
+    document.body.style.cursor = ''
+  }
+
+  document.body.style.cursor = 'col-resize'
+  window.addEventListener('pointermove', move)
+  window.addEventListener('pointerup', finish)
+  window.addEventListener('pointercancel', finish)
+}
+
 function setActive(side: PanelSide): void {
   activeWorkspace.value.activeSide.value = side
 }
@@ -934,13 +999,46 @@ onBeforeUnmount(() => {
           :displaying="stageSide === 'left'"
           :transferred="transferredSide === 'left'"
           :displayed-clock="transferredSide === 'left' ? displayedClock : null"
+          :style="{ flexGrow: splitRatio }"
           @select="setActive('left')"
           @pointer-down="focusPanes"
           @stage-clock="displayedClock = $event"
           @stage-on="showStage('left')"
           @stage-off="exitStage()"
         />
-        <div class="w-px shrink-0 bg-border"></div>
+        <!-- The boundary between the panes, and the handle that moves it: the
+             line stays a pixel, while an invisible band around it is what the
+             pointer actually grabs. The re-centre button hangs off its bottom
+             once the split has been dragged off-centre. -->
+        <div class="relative w-px shrink-0 bg-border">
+          <div
+            class="absolute inset-y-0 -left-1 -right-1 z-10 cursor-col-resize"
+            @pointerdown="startSplitDrag"
+          ></div>
+          <button
+            v-if="!splitCentered"
+            type="button"
+            class="absolute bottom-1 left-1/2 z-20 flex h-5 w-5 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-surface text-fg-dim shadow transition-colors hover:bg-hover hover:text-fg"
+            title="Center the panes"
+            aria-label="Center the panes"
+            @click="centerSplit"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              class="h-3 w-3"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M12 3v18" />
+              <path d="M5 9.5 8.5 12 5 14.5" />
+              <path d="M19 9.5 15.5 12 19 14.5" />
+            </svg>
+          </button>
+        </div>
         <FilePanel
           :key="`${activeWorkspace.id}:right`"
           ref="rightPanel"
@@ -950,6 +1048,7 @@ onBeforeUnmount(() => {
           :displaying="stageSide === 'right'"
           :transferred="transferredSide === 'right'"
           :displayed-clock="transferredSide === 'right' ? displayedClock : null"
+          :style="{ flexGrow: 1 - splitRatio }"
           @select="setActive('right')"
           @pointer-down="focusPanes"
           @stage-clock="displayedClock = $event"
