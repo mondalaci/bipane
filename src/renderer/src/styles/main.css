@@ -20,6 +20,12 @@
   --color-selection: #04395e;
   --color-selection-inactive: #37373d;
   --color-selected: #f2c94c;
+  /* A marked row's band: the mark's own hue (45deg), hand-picked rather than
+     mixed, because `color-mix(--color-selected, --color-bg)` walks to the
+     background in a straight line and every stop on that line below the bright
+     end reads olive rather than yellow. Nothing else about a marked row changes,
+     so this is what the row's own text colors sit on. */
+  --color-marked: #625018;
   --color-hover: #2a2d2e;
   --color-folder: #519aba;
   --color-runnable: #98c379;
@@ -43,7 +49,7 @@
 }
 
 /*
- * The cursor sitting on a marked row. The mark's own yellow band wins the row's
+ * The cursor sitting on a marked row. The mark's own band wins the row's
  * background — it is the stronger claim, since it is what F5/F6/F8 act on — so
  * the cursor has no band of its own left to show, and falls back to the outline
  * this app already uses for focus (`:focus-visible`). It is drawn just inside

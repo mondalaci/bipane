@@ -2174,13 +2174,14 @@ function rowClass(index: number): string {
   const entry = props.controller.state.entries[index]
   const cursor = index === props.controller.state.cursor
 
-  // A marked row is a band in the mark's own yellow, with its text dark against
-  // it. The band wins over the cursor's blue: the mark is the stronger claim,
-  // since it is what F5/F6/F8 act on. The cursor on a marked row would then have
-  // no band left to show, so it keeps an outline inside the yellow.
+  // A marked row takes the gold band (`bg-marked`) and nothing else, so every
+  // text color on the row goes on reading as itself. The band wins over the
+  // cursor's blue: the mark is the stronger claim, since it is what F5/F6/F8 act
+  // on. The cursor on a marked row would then have no band left to show, so it
+  // keeps an outline inside the band.
   let base: string
   if (entry && props.controller.isSelected(entry)) {
-    base = 'bg-selected text-bg'
+    base = 'bg-marked'
     if (cursor) base += ' cursor-on-marked'
   } else if (cursor) {
     base = props.active ? 'bg-selection text-fg-bright' : 'bg-selection-inactive text-fg'
@@ -2193,24 +2194,14 @@ function rowClass(index: number): string {
   return entry && props.controller.state.fresh.has(entry.path) ? `${base} flash-row` : base
 }
 
-function metaClass(index: number): string {
-  // A marked row's own dark text carries its size and date: the dim grey the
-  // other rows use has nothing to say against a yellow band.
-  const entry = props.controller.state.entries[index]
-  if (entry && props.controller.isSelected(entry)) return ''
-  return index === props.controller.state.cursor ? 'text-fg' : 'text-fg-dim'
-}
-
 /**
  * The name's own color: the green of a file the user can run (`--color-runnable`,
- * lib/executable.ts). A marked row takes none — its yellow band says the row is
- * marked, and the green would be lost against it.
+ * lib/executable.ts). A marked row keeps it — the mark's band is a tint, so the
+ * name goes on reading in its own color.
  */
 function nameClass(index: number): string {
   const entry = props.controller.state.entries[index]
-  if (!entry) return ''
-  if (props.controller.isSelected(entry)) return ''
-  return isRunnable(entry) ? 'text-runnable' : ''
+  return entry && isRunnable(entry) ? 'text-runnable' : ''
 }
 
 /**
@@ -2380,22 +2371,17 @@ function onRenameBlur(): void {
 
           <span
             v-if="entry.isSymlink && entry.symlinkTarget"
-            class="max-w-40 shrink-0 truncate font-mono text-ui-sm"
-            :class="controller.isSelected(entry) ? '' : 'text-fg-dim'"
+            class="max-w-40 shrink-0 truncate font-mono text-ui-sm text-fg-dim"
             :title="entry.symlinkTarget"
           >
             → {{ entry.symlinkTarget }}
           </span>
 
-          <span
-            class="w-16 shrink-0 text-right tabular-nums"
-            :class="metaClass(index)"
-          >
+          <span class="w-16 shrink-0 text-right tabular-nums text-fg">
             {{ entry.kind === 'directory' ? '' : formatSize(entry.size) }}
           </span>
           <span
-            class="w-28 shrink-0 text-right tabular-nums"
-            :class="metaClass(index)"
+            class="w-28 shrink-0 text-right tabular-nums text-fg"
             :title="entry.isParent ? undefined : formatExactDate(entry.mtimeMs)"
           >
             {{ entry.isParent ? '' : formatRelativeDate(entry.mtimeMs) }}

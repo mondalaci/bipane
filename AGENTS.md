@@ -230,16 +230,22 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   mutes the panes at the shell's directory from a submitted command until it
   finishes and settles. A download in another directory, or one that starts
   after the tail, still sweeps; so does `Ctrl+R`.
-- **A mark is a yellow band across the row, and it owns the row's background.**
-  A marked row takes `bg-selected` with `text-bg` on it (`rowClass`), so the size,
-  the date and the symlink target — dim grey on every other row — drop their own
-  colors there (`metaClass`) to be read against yellow. The band beats the
-  cursor's blue, because the mark is the stronger claim: it is what F5/F6/F8 act
-  on. A cursor left standing on a marked row would then have no band of its own to
-  show, so it takes `cursor-on-marked` (`main.css`) — the same 1px accent outline
-  the app already uses for `:focus-visible`, drawn just inside the row. That is
-  what keeps "the row I am on" and "the row I marked" tellable apart when the two
-  coincide; without it the cursor would vanish into the yellow.
+- **A mark is a gold band across the row, and nothing else changes.**
+  A marked row takes `bg-marked` (`main.css`) — a dark gold, `#625018`, the
+  mark's own hue (`--color-selected`, 45deg) hand-picked rather than mixed,
+  because a `color-mix` of that yellow into the row background walks to the
+  background in a straight line and reads olive at every stop below the bright
+  end. It is a band rather than a highlight, which is what lets every color on
+  the row go on reading as itself: the name keeps the color its kind gives it,
+  including the green of something runnable, the size and the date keep the plain
+  `text-fg` a filename has, and only the symlink target beside them stays dim.
+  The band beats the cursor's blue, because the mark is the stronger claim: it
+  is what F5/F6/F8 act on. A cursor left standing on a marked row would then have
+  no band of its own to show, so it takes `cursor-on-marked` (`main.css`) — the
+  same 1px accent outline the app already uses for `:focus-visible`, drawn just
+  inside the row. That is what keeps "the row I am on" and "the row I marked"
+  tellable apart when the two coincide; without it the cursor would vanish into
+  the band.
 - **A file the user can run is named in green.** The rule is `isRunnable` in
   `lib/executable.ts`, and it needs both halves: an exec bit on a regular file,
   *and* a name the icon table has not already recognized as data. So a screenshot
