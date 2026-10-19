@@ -1362,6 +1362,19 @@ function readStageClock(): void {
 }
 
 /**
+ * A clip that has run out: the display plays once rather than looping, so the
+ * last frame stays on screen and the transport says `Play` again — an element
+ * that has ended is not marked paused by a `pause` event, so the button's own
+ * `stagePlaying` has to be told here rather than waiting for one that never
+ * comes. Stepping back into the clip plays on from there (`seek`), which is
+ * where `@play` turns it back.
+ */
+function onStageEnded(): void {
+  readStageClock()
+  stagePlaying.value = false
+}
+
+/**
  * The clock the bar is drawn from, which has to be continuous across the hand-off
  * in both directions: the display's while it has the clip, the last position the
  * display was at while the clip is on its way back (the element is fresh and has
@@ -2733,16 +2746,17 @@ function onRenameBlur(): void {
             :style="stageColumnStyle"
           >
             <!-- A display is for watching rather than glancing at, so the clip
-                 plays on and on here with its sound — the element stays muted
-                 until the reveal has it fade up, and a failure to load leaves it
-                 silent. The footer's own thumbnail is the one that plays once,
-                 and silently. A click on the picture itself pauses or resumes. -->
+                 plays here with its sound — the element stays muted until the
+                 reveal has it fade up, and a failure to load leaves it silent.
+                 It plays once, like the footer's own silent thumbnail rather
+                 than looping: a clip that has run out stops where it ended, and
+                 stepping past its end stops there too. A click on the picture
+                 itself pauses or resumes. -->
             <video
               ref="stageMedia"
               :src="stageVideoUrl ?? undefined"
               muted
               autoplay
-              loop
               class="w-full min-h-0 origin-top-left object-contain"
               :class="stageState === 'ready' ? '' : 'invisible'"
               :style="stageVideoStyle"
@@ -2750,7 +2764,7 @@ function onRenameBlur(): void {
               @loadeddata="onStageShown"
               @timeupdate="readStageClock"
               @seeked="readStageClock"
-              @ended="readStageClock"
+              @ended="onStageEnded"
               @play="stagePlaying = true"
               @pause="stagePlaying = false"
               @click="onStageVideoClick"

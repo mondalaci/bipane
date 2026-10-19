@@ -516,7 +516,11 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   enlarged clip is the one thing that makes a sound: its element stays muted
   until the reveal, then its volume is ramped up over the reveal's own length,
   and ramped back down — ending muted — as it shrinks away. The footer's own
-  thumbnail stays silent throughout. The ramp follows frame callbacks for
+  thumbnail stays silent throughout. It does not loop, either: a clip that has
+  run out stays on its last frame with the transport saying `Play`, so the end
+  of the clip is an end here too, and only a step back into it plays on
+  (`onStageEnded` clears `stagePlaying`, since an ended element fires no
+  `pause`). The ramp follows frame callbacks for
   smoothness but is bounded in time as well, because those stop while the window
   is hidden and a dismissal waits on it. The display *takes the clip over*: the
   pane that asked gives up its own copy rather than playing it twice — no
