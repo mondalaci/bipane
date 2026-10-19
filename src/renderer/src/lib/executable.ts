@@ -63,3 +63,13 @@ export function isRunnable(entry: PaneEntry): boolean {
   if (PROGRAM_EXTENSIONS.has(extensionOf(entry.name))) return true
   return !isKnownName(entry.name)
 }
+
+/**
+ * Whether activating the row should run it, rather than hand it to the system
+ * the way an ordinary file is opened. That is the green rule (`isRunnable`) less
+ * a desktop entry: a `.desktop` file describes a program rather than being one,
+ * and the system is exactly what knows how to launch those.
+ */
+export function shouldExecute(entry: PaneEntry): boolean {
+  return isRunnable(entry) && !entry.name.toLowerCase().endsWith('.desktop')
+}

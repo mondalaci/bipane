@@ -1929,6 +1929,8 @@ const notice = computed(() => {
 })
 
 let listObserver: ResizeObserver | null = null
+/** The footer's height at the last resize, to tell a strip move from the rest. */
+let lastFooterHeight: number | null = null
 
 function measurePageRows(): void {
   const element = listEl.value
@@ -1966,17 +1968,26 @@ function measureListSlack(): void {
 }
 
 /**
- * The listing just changed height, which means the strip is taking room from it
- * (it is the only thing that changes size here, and it only grows in an
- * animation — a strip shrinking snaps, so this never sees room coming back).
- * The strip's growth owns the cursor row's reveal, because nothing else knows
- * the strip is arriving: the move measured the room the listing had, and this is
- * the part the strip brings, so the row ends up against the strip's edge rather
- * than being stepped into and out again as the strip goes by.
+ * The listing just changed height, and what should happen to the view depends on
+ * which of two things changed it. The strip growing *inside* the pane is
+ * arriving in room the cursor's row needs, so it wants that row revealed — the
+ * band in `measureListSlack` is what keeps the rows themselves from moving. The
+ * pane's own box changing — the terminal taking room for a program, and giving it
+ * back when the program ends — must instead leave the view where it is: nothing
+ * in the listing moved, and a reveal would scroll the view down into the
+ * shrunken pane with nothing to scroll it back, since the pane growing again is
+ * not itself a reason to move.
+ *
+ * The two are told apart by the footer's own height, which only a strip change
+ * moves.
  */
 function onListResize(): void {
   measurePageRows()
-  scrollRowIntoView(props.controller.state.cursor, 'nearest')
+
+  const footer = footerEl.value?.offsetHeight ?? 0
+  const stripMoved = lastFooterHeight !== null && footer !== lastFooterHeight
+  lastFooterHeight = footer
+  if (stripMoved) scrollRowIntoView(props.controller.state.cursor, 'nearest')
 }
 
 /**

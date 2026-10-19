@@ -8,7 +8,7 @@ import {
   type ComputedRef,
   type Ref
 } from 'vue'
-import { useDirectory, type PaneController } from '@renderer/composables/useDirectory'
+import { useDirectory, type PaneController, type PaneEntry } from '@renderer/composables/useDirectory'
 import { createShell, type Shell } from '@renderer/composables/useShell'
 import type { PanelSide } from '@shared/types'
 
@@ -75,8 +75,8 @@ export function createWorkspace(id: string, label: string): Workspace {
   let api!: Workspace
 
   scope.run(() => {
-    const left = shallowRef<PaneController>(useDirectory('left'))
-    const right = shallowRef<PaneController>(useDirectory('right'))
+    const left = shallowRef<PaneController>(useDirectory('left', { run: runInShell }))
+    const right = shallowRef<PaneController>(useDirectory('right', { run: runInShell }))
     const shell = createShell(id)
 
     const activeSide = ref<PanelSide>('left')
@@ -168,6 +168,8 @@ export function createWorkspace(id: string, label: string): Workspace {
 
     let commandPending = false
     let commandSettleTimer: number | null = null
+    /** Whoever is waiting for the command the shell is running to be over. */
+    let whenCommandFinished: (() => void) | null = null
 
     function refreshPanelsAtShellCwd(): void {
       const target = shell.cwd.value
@@ -175,6 +177,21 @@ export function createWorkspace(id: string, label: string): Workspace {
       for (const pane of [left.value, right.value]) {
         if (pane.state.path === target) void pane.refresh()
       }
+    }
+
+    /**
+     * The command the shell was running is over: unmute the panes it could have
+     * changed, re-list them, and release whoever is waiting on it — which is a
+     * file Enter started in the shell, whose terminal is shown until it is done.
+     */
+    function finishCommand(): void {
+      if (!commandPending) return
+      commandPending = false
+      const resolve = whenCommandFinished
+      whenCommandFinished = null
+      unmuteShellPanes()
+      refreshPanelsAtShellCwd()
+      resolve?.()
     }
 
     /**
@@ -217,27 +234,76 @@ export function createWorkspace(id: string, label: string): Workspace {
       if (!commandPending) return
       await shell.refreshState()
       if (!commandPending || !shell.idle.value) return
-      commandPending = false
-      unmuteShellPanes()
-      refreshPanelsAtShellCwd()
+      finishCommand()
     }
 
     watch(shell.commandSeq, noteCommandSubmitted)
 
     watch(shell.idle, (idleNow) => {
-      if (!idleNow || !commandPending) return
-      commandPending = false
-      unmuteShellPanes()
-      refreshPanelsAtShellCwd()
+      if (idleNow) finishCommand()
     })
 
     // A shell that dies mid-command never reaches idle, so nothing else would
     // release the muting. Resuming on exit keeps the sweep working afterwards.
     watch(shell.started, (started) => {
-      if (started) return
-      commandPending = false
-      unmuteShellPanes()
+      if (!started) finishCommand()
     })
+
+    /**
+     * Whether the terminal is up because a program this workspace started is
+     * running, and whether anyone but us has touched it since: a Ctrl+O while it
+     * runs means the user has the terminal, so the collapse at the end of a run
+     * is only ours to make if nothing moved it in the meantime. The watcher is
+     * synchronous so that our own two writes are still flagged when it fires.
+     */
+    let terminalForRun = false
+    let writingTerminal = false
+
+    watch(
+      terminalExpanded,
+      () => {
+        if (writingTerminal) return
+        terminalForRun = false
+      },
+      { flush: 'sync' }
+    )
+
+    /**
+     * Run a file the user can run in the shell the panes already have, and
+     * resolve when it is over. Its stdout and stderr are the terminal's, since
+     * it is the shell's own foreground process rather than something spawned
+     * behind its back; the terminal is shown for as long as it runs.
+     *
+     * The command is typed into the shell's own line, exactly as Alt+Enter types
+     * a name, so it echoes and reaches the history like a real command line —
+     * and "a submitted command is running", the state the panes already keep to
+     * re-list and to stay quiet, is what says when it finished. `false` means
+     * the shell was busy, and nothing was run.
+     */
+    async function runInShell(entry: PaneEntry): Promise<boolean> {
+      if (!shell.started.value || !shell.idle.value) return false
+
+      const restore = !terminalExpanded.value
+      if (restore) {
+        writingTerminal = true
+        terminalForRun = true
+        terminalExpanded.value = true
+        writingTerminal = false
+      }
+
+      const finished = new Promise<void>((resolve) => {
+        whenCommandFinished = resolve
+      })
+      shell.sendInput(`${shellQuote(entry.path)}\r`)
+      await finished
+
+      if (restore && terminalForRun) {
+        writingTerminal = true
+        terminalExpanded.value = false
+        writingTerminal = false
+      }
+      return true
+    }
 
     async function init(): Promise<void> {
       await Promise.all([left.value.init(), right.value.init()])

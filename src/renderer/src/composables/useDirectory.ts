@@ -1,4 +1,5 @@
 import { onScopeDispose, reactive } from 'vue'
+import { shouldExecute } from '@renderer/lib/executable'
 import type { DirEntry, DirListing, PanelSide } from '@shared/types'
 
 export type PaneEntry = DirEntry & { isParent?: boolean }
@@ -168,7 +169,17 @@ function diffEntries(before: PaneEntry[], after: PaneEntry[]): Set<string> {
   return changed
 }
 
-export function useDirectory(side: PanelSide): PaneController {
+export interface PaneOptions {
+  /**
+   * Run a file the user asked to run. The pane decides *when* — Enter on a file
+   * it can run (`lib/executable.ts`) — and hands the entry to whoever owns the
+   * shell; `false` means the shell was in no state to take it, which the pane
+   * reports as its notice.
+   */
+  run(entry: PaneEntry): Promise<boolean>
+}
+
+export function useDirectory(side: PanelSide, options: PaneOptions): PaneController {
   const state = reactive<PaneState>({
     side,
     path: '',
@@ -652,6 +663,16 @@ export function useDirectory(side: PanelSide): PaneController {
 
     if (entry.kind === 'directory') {
       await navigateTo(entry.path)
+      return
+    }
+
+    // A file the user can run is a file they meant to run: Enter starts it in
+    // the shell rather than handing it to whatever the system opens an unknown
+    // type with. A `.desktop` is the exception — it *describes* a program, and
+    // the system is the thing that launches those.
+    if (shouldExecute(entry)) {
+      const started = await options.run(entry)
+      if (!started) state.error = 'The shell is busy'
       return
     }
 

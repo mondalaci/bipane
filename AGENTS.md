@@ -76,7 +76,8 @@ src/renderer/src/composables/useDirectory.ts per-pane navigation state + actions
 src/renderer/src/lib/format.ts               size/date/permission formatting
 src/renderer/src/lib/executable.ts           what a row's green name means: a file with an
                                              exec bit whose name the icon table does not
-                                             already know as data
+                                             already know as data, and (`shouldExecute`)
+                                             which of those Enter runs rather than opens
 src/renderer/src/lib/preview.ts              what a row is previewable as (image or
                                              video), keyed by content, where a
                                              playing clip has got to (PlaybackClock),
@@ -100,7 +101,11 @@ box — the arrows are the line's own keys again and the Ctrl steps belong to th
 shell, whose `Ctrl+H` is backspace, `Ctrl+L` clear-screen and `Ctrl+J`
 accept-line; `Space` pauses or resumes the clip being watched there — the
 display's, or the footer preview if none is up — and stays the shell's own space
-when there is no clip to toggle), `Enter` descends or opens with the system default app — except on an image or a
+when there is no clip to toggle), `Enter` descends, or runs a file the user can
+run in the workspace's own shell — the green name is a promise, and the shell is
+where it is kept, shown for as long as the program runs (see below) — or opens
+anything else with the system default app, except
+an image or a
 video, which it displays in the other pane instead (see below) — and a
 double-click on a row is the same thing with the mouse (`activate` →
 `activateRow`), `Ctrl+Enter` opens that same media as a full-screen display over
@@ -255,9 +260,29 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   is on the extension the icon table would use, and its last dotted part names
   nothing. The color is `text-runnable` (`main.css`, `--color-runnable`), and it
   goes on the row's *name span* by way of `nameClass`, not on the row: the icon
-  keeps the color its own type gives it, the size and date beside the name stay
-  dim, and a marked row gives the green up — its yellow band is the row's whole
-  answer, and green on yellow has nothing to say.
+  keeps the color its own type gives it, the size and date beside the name take
+  the plain `text-fg` rather than a dim of it, and a marked row keeps the green
+  too — the mark's band is a tint, so the name goes on reading in its own color
+  there.
+- **A file the user can run is run on Enter, in the shell the panes already
+  have.** `shouldExecute` (`lib/executable.ts`) is the green rule less a
+  `.desktop` — that one *describes* a program, and the system is what launches
+  those — and the pane hands the entry to its workspace, which types the quoted
+  path into the shell's own line and submits it (`runInShell` in
+  `useWorkspace.ts`), so it echoes and reaches the history like a real command
+  line. The program's stdout and stderr *are* the terminal's: it is the shell's
+  foreground process rather than something spawned behind its back, so there is
+  nothing to pipe anywhere. The terminal is shown for as long as it runs — the
+  run expands it, and collapses it again only if it was collapsed to begin with
+  and no Ctrl+O touched it in between, since a program that holds the shell holds
+  the terminal with it. When it is over is the same signal the panes already keep
+  for a submitted command: `shell.idle`, the one that re-lists the panes at the
+  shell's directory and releases the `await`. The panes' own view is left where
+  it was for all of it: the terminal taking room and giving it back is the pane's
+  box changing rather than the listing moving, which is a resize `onListResize`
+  has no cursor to reveal for (see the footer's own note). A busy shell takes no
+  second command, so Enter on an executable while one runs is refused with the
+  pane's own notice rather than fed to whatever is running.
 - **A pane footer previews the image under its cursor.** The footer grows to
   fit a thumbnail read through `fs:read-image`, which is the only way to show a
   file the renderer has no URL for: the extension->MIME map lives in
@@ -279,7 +304,12 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   row clear of the strip as it arrives (`onListResize`), which is what makes a
   move onto media near the bottom land with the row visible however much the
   strip takes — and it is deliberately one-way, since a listing that has just
-  *gained* room must not be scrolled up for room it is regaining. What the strip
+  *gained* room must not be scrolled up for room it is regaining. That reveal is
+  the *strip's* alone, and `onListResize` tells the two causes of a resize apart
+  by the footer's own height: the pane's box changing — the terminal taking room
+  for a program and giving it back — must leave the view alone, since nothing in
+  the listing moved and the reveal would scroll the view down into the shrunken
+  pane with nothing to bring it back. What the strip
   may not do either way is move the rows: its height is the listing's height, so
   as it gives its room back the view's bottom edge moves, and the browser keeps
   the view where it is rather than show blank below the content, which would drag
