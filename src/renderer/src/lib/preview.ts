@@ -1,6 +1,11 @@
 import { ref } from 'vue'
 import { imageMimeFor } from '@shared/image'
-import { needsTranscode, videoMimeFor } from '@shared/video'
+import {
+  codecNeedsTranscode,
+  needsTranscode,
+  videoCodecSniffable,
+  videoMimeFor
+} from '@shared/video'
 import type { PaneEntry } from '@renderer/composables/useDirectory'
 
 /**
@@ -24,14 +29,71 @@ export async function loadTranscodeSupport(): Promise<void> {
 export type PreviewKind = 'image' | 'video'
 
 /**
- * What a name is previewable as, or null when it is neither. The shared
- * extension maps are the same ones main reads, streams and transcodes by, so a
- * pane only ever asks for something it can be given.
+ * The video codec inside a container Chromium demuxes, by the identity of the
+ * file whose header it was read from. A name can say a file is a video and which
+ * container it is in, but not which stream is inside it: an `.mp4` is HEVC as
+ * often as it is H.264, and HEVC is not something Chromium decodes here — the
+ * format's only decoder is the platform one, which is the hardware decoder this
+ * app turns off — so it has to be asked of the file, and only a header read can
+ * tell. Absent means not asked yet, and null means the header did not say; a
+ * `ref` over the map so that an answer arriving for a row the cursor is already
+ * on re-derives what to show for it.
  */
-export function previewKindFor(name: string): PreviewKind | null {
-  if (imageMimeFor(name)) return 'image'
-  if (videoMimeFor(name) !== null) return 'video'
-  if (canTranscodePreview() && needsTranscode(name)) return 'video'
+const videoCodecs = ref<Map<string, string | null>>(new Map())
+
+/** The files whose codec is being asked for, so a row reached twice asks once. */
+const probing = new Set<string>()
+
+/** How a file is identified for the caches: its content, not merely its path. */
+function identityOf(path: string, size: number, mtimeMs: number): string {
+  return `${path}\u0000${size}:${mtimeMs}`
+}
+
+/** The codec already read for an entry, or undefined while it has not been asked. */
+function codecOf(entry: PaneEntry): string | null | undefined {
+  return videoCodecs.value.get(identityOf(entry.path, entry.size, entry.mtimeMs))
+}
+
+/**
+ * Ask the file itself which stream it holds, for the one case no name can
+ * answer: a container whose extension says "video" whatever is inside it. It is
+ * cheap enough to be issued on the cursor move rather than with the read — a
+ * header read in main, no decode — which is what has the answer in hand before
+ * the settle lets the element fetch anything.
+ */
+export function probeVideoCodec(target: PreviewTarget | null): void {
+  if (target === null || target.kind !== 'video' || target.encode) return
+  if (!videoCodecSniffable(target.name)) return
+
+  const identity = identityOf(target.path, target.size, target.mtimeMs)
+  if (videoCodecs.value.has(identity) || probing.has(identity)) return
+
+  probing.add(identity)
+  void window.bipane.fs.videoCodec(target.path).then((codec) => {
+    probing.delete(identity)
+    videoCodecs.value.set(identity, codec)
+  })
+}
+
+/**
+ * What an entry is previewable as, or null when it is not media at all. The
+ * shared extension maps are what main reads, streams and transcodes by, so a
+ * pane only ever asks for something it can be given — the one thing they cannot
+ * say being what stream a container of Chromium's is holding.
+ */
+export function previewKindFor(entry: PaneEntry): PreviewKind | null {
+  if (imageMimeFor(entry.name)) return 'image'
+
+  if (videoMimeFor(entry.name) !== null) {
+    // A container Chromium demuxes, which is still only playable while the
+    // stream inside it is one Chromium decodes. Until the header has been read
+    // the name's answer stands — and keeps standing for the codecs it cannot
+    // name — so the file is served as it stands, exactly as it was before.
+    if (!codecNeedsTranscode(codecOf(entry) ?? null)) return 'video'
+    return canTranscodePreview() ? 'video' : null
+  }
+
+  if (canTranscodePreview() && needsTranscode(entry.name)) return 'video'
   return null
 }
 
@@ -43,6 +105,14 @@ export function previewKindFor(name: string): PreviewKind | null {
  */
 export interface PreviewTarget {
   kind: PreviewKind
+  /**
+   * Whether showing this means *encoding* it: the stream a pane mounts for it is
+   * an ffmpeg encode rather than the file. True for a container Chromium has
+   * nothing for, and for one it demuxes whose stream it cannot decode — so it is
+   * the same flag that carries the seek that a live stream needs and the length
+   * only the file itself can report. False for an image, which is never a stream.
+   */
+  encode: boolean
   path: string
   name: string
   size: number
@@ -53,15 +123,25 @@ export interface PreviewTarget {
 export function previewTargetFor(entry: PaneEntry | null | undefined): PreviewTarget | null {
   if (!entry || entry.isParent || entry.kind !== 'file') return null
 
-  const kind = previewKindFor(entry.name)
+  const kind = previewKindFor(entry)
   if (kind === null) return null
 
-  return { kind, path: entry.path, name: entry.name, size: entry.size, mtimeMs: entry.mtimeMs }
+  const encode =
+    kind === 'video' && (needsTranscode(entry.name) || codecNeedsTranscode(codecOf(entry) ?? null))
+
+  return {
+    kind,
+    encode,
+    path: entry.path,
+    name: entry.name,
+    size: entry.size,
+    mtimeMs: entry.mtimeMs
+  }
 }
 
 /** The key that identifies a preview by what it shows, not merely by which file it came from. */
 export function previewKeyFor(target: PreviewTarget | null): string | null {
-  return target ? `${target.path}\u0000${target.size}:${target.mtimeMs}` : null
+  return target ? identityOf(target.path, target.size, target.mtimeMs) : null
 }
 
 /**

@@ -11,6 +11,7 @@ import {
   formatSize
 } from '@renderer/lib/format'
 import {
+  probeVideoCodec,
   previewKeyFor,
   previewTargetFor,
   type OsdFlash,
@@ -20,7 +21,7 @@ import {
 } from '@renderer/lib/preview'
 import FileIcon from '@renderer/components/FileIcon.vue'
 import PlaybackOsd from '@renderer/components/PlaybackOsd.vue'
-import { MEDIA_SCHEME, needsTranscode } from '@shared/video'
+import { MEDIA_SCHEME } from '@shared/video'
 import type { PixelSize } from '@shared/types'
 
 const ROW_HEIGHT = 22
@@ -187,7 +188,7 @@ const stageFrom = ref(0)
 const videoUrl = computed(() => {
   const target = previewTarget.value
   if (!target || target.kind !== 'video') return null
-  return mediaUrlFor(target.path, needsTranscode(target.name) ? footerFrom.value : 0)
+  return mediaUrlFor(target.path, target.encode ? footerFrom.value : 0)
 })
 
 const showImage = computed(() => previewTarget.value?.kind === 'image' && frame.value !== null)
@@ -336,7 +337,13 @@ watch(
     // blinks between rows nor flashes a width it is about to leave.
     settled.value = false
     previewState.value = 'probing'
+    // A video's shape comes from the element's own metadata, but *which* stream
+    // to mount is settled by a header read: a container Chromium demuxes holds
+    // a codec it cannot decode as often as one it can. The probe is issued here,
+    // on the cursor move, so its answer is in before the settle lets the element
+    // fetch anything — the same reason an image's shape is asked for here.
     if (target.kind === 'image') void loadImageSizeHint(token, target.path)
+    else probeVideoCodec(target)
 
     previewTimer = window.setTimeout(() => {
       previewTimer = null
@@ -495,7 +502,7 @@ let contentBlur: Animation | null = null
 const stageVideoUrl = computed(() => {
   const stage = shownStage.value
   if (!stage || stage.target.kind !== 'video') return null
-  return mediaUrlFor(stage.target.path, needsTranscode(stage.target.name) ? stageFrom.value : 0)
+  return mediaUrlFor(stage.target.path, stage.target.encode ? stageFrom.value : 0)
 })
 
 /** An image being displayed on behalf of another pane, as a `data:` URL. */
@@ -1234,7 +1241,7 @@ const previewVideo = ref<HTMLVideoElement | null>(null)
  */
 function isStream(element: HTMLVideoElement): boolean {
   const target = element === stageMedia.value ? shownStage.value?.target : previewTarget.value
-  return target !== null && target !== undefined && needsTranscode(target.name)
+  return target !== null && target !== undefined && target.encode
 }
 
 /** Where the footer's clip has got to, and how long it is once that is knowable. */
@@ -1267,7 +1274,7 @@ function clockOf(element: HTMLVideoElement): PlaybackClock {
  * once per file, and only for a clip main has to encode.
  */
 function ensureClipLength(target: PreviewTarget): void {
-  if (!needsTranscode(target.name)) return
+  if (!target.encode) return
 
   const key = previewKeyFor(target)
   if (key === null || key === clipLengthKey) return
@@ -1280,7 +1287,7 @@ function ensureClipLength(target: PreviewTarget): void {
 
 /** The length of a displayed clip main has to encode, asked of the file once. */
 function ensureStageLength(target: PreviewTarget): void {
-  if (!needsTranscode(target.name)) return
+  if (!target.encode) return
 
   const key = previewKeyFor(target)
   if (key === null || key === stageClipLengthKey) return

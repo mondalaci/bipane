@@ -34,13 +34,19 @@ src/main/imageSize.ts    header-only image dimensions (PNG/JPEG+EXIF/GIF/BMP/
                          ICO/WebP/SVG); no decode, so it answers in well under
                          a millisecond even for a file the preview has to
                          downscale
+src/main/videoCodec.ts   header-only codec sniff for the containers Chromium
+                         demuxes (mp4/m4v/mov): a box walk to the video track's
+                         sample description, so the HEVC of a phone recording is
+                         told from H.264; only box headers are read, and nothing
+                         that fails to parse is an error — it answers null
 src/main/media.ts        the bipane-media scheme a pane plays a video through: a
                          ranged byte stream, so the element fetches the metadata
                          and the frames it needs rather than a hundred-megabyte
-                         file; and, for what Chromium cannot play at all, a live
-                         encode of the clip from a wanted position, which is also
-                         what a seek on one is (fs:can-transcode says whether
-                         that is possible here)
+                         file; and, for what Chromium cannot play, a live encode
+                         of the clip from a wanted position, which is also what a
+                         seek on one is (fs:can-transcode says whether that is
+                         possible here, and fs:video-codec what the stream
+                         inside a container Chromium does demux is)
 src/main/ipc/watch.ts    IPC: fs:watch, fs:unwatch; pushes fs:changed when a
                          watched directory's contents change (fs.watch = inotify)
 src/main/ipc/pty.ts      IPC: pty:create/write/resize/kill/state, pushes pty:data, pty:exit
@@ -52,7 +58,8 @@ src/shared/api.ts        BipaneApi interface (the preload contract)
 src/shared/image.ts      extension -> previewable image MIME map, shared so the
                          renderer and main agree on what a footer may preview
 src/shared/video.ts      the same for video, plus the extensions only ffmpeg
-                         can make playable, and the media scheme's name
+                         can make playable, the codecs Chromium decodes itself,
+                         and the media scheme's name
 src/renderer/src/App.vue global keyboard model, workspace stack, layout, focus
 src/renderer/src/components/TitleBar.vue     frameless title bar + window controls;
                                              hosts the workspace tab strip
@@ -108,7 +115,8 @@ run in the workspace's own shell — the green name is a promise, and the shell 
 where it is kept, shown for as long as the program runs (see below) — or opens
 anything else with the system default app, except
 an image or a
-video, which it displays in the other pane instead (see below) — and a
+video, which it displays in the other pane instead (see below; one there is
+nothing in the app to decode is opened like any other file) — and a
 double-click on a row is the same thing with the mouse (`activate` →
 `activateRow`), `Ctrl+Enter` opens that same media as a full-screen display over
 the whole window (a triple-click on the file's name is the mouse's half of the
@@ -413,14 +421,16 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   show nor a position yet. The scheme is declared before the
   app is ready, `media-src` carries it in the CSP, and only previewable
   extensions are served, so it cannot become a reader for anything the bar would
-  not have offered anyway. A `.mov` is served as `video/mp4`: Chromium plays the
-  H.264 or HEVC inside an ISOBMFF container but will not accept the QuickTime
-  type, and `videoMimeFor` is the only place that mapping lives. Its shape comes
-  from the element's own metadata — there is no header parser for video, as there
-  is for images — so the element is mounted, and therefore starts fetching, only
-  once the cursor settles: like the image read, a burst over a folder of clips
-  must not start a fetch per row. Finally the window disables the hardware video
-  decoder (in `src/main/index.ts`): its frames reach the compositor as DMA-BUFs
+  not have offered anyway. A `.mov` is served as `video/mp4`: Chromium demuxes
+  the H.264 or HEVC inside an ISOBMFF container but will not accept the
+  QuickTime type, and `videoMimeFor` is the only place that mapping lives. Its
+  shape comes from the element's own metadata — there is no header parser for
+  video *dimensions*, as there is for images — so the element is mounted, and
+  therefore starts fetching, only once the cursor settles: like the image read, a
+  burst over a folder of clips must not start a fetch per row. (What stream to
+  mount at all is a header read of its own — see the codec sniff below.)
+  Finally the window disables the hardware video decoder (in
+  `src/main/index.ts`): its frames reach the compositor as DMA-BUFs
   that a Linux session without a working GBM path cannot import, which takes the
   GPU process down with the decode and disturbs the window's rendering over a
   preview nobody asked to watch.
@@ -629,7 +639,47 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   position in the clip. All of this is gated on ffmpeg existing: the renderer asks once
   (`fs:can-transcode`) and, with no answer, those files are not media at all —
   `Enter` opens them in the system player, exactly as before that list existed.
+  That list is not the only way in to this encode, either: a container Chromium
+  demuxes but cannot decode reaches it too (see the next note).
   `BIPANE_FFMPEG` names the binary for a machine that keeps it off the PATH.
+- **A container Chromium demuxes is not a stream Chromium decodes, and only the
+  header can tell the two apart.** An `.mp4` off a phone is HEVC as often as it
+  is H.264, and HEVC is the one codec Chromium reaches *only* through a platform
+  decoder — which on Linux is the hardware video decoder this app turns off (see
+  `src/main/index.ts`) — so such a file demuxes, plays its sound and draws
+  nothing at all. No extension can say which it is, so `src/main/videoCodec.ts`
+  reads the codec out of the file's own header: a box walk down `moov` → `trak`
+  whose handler is `vide` → `mdia` → `minf` → `stbl` → `stsd`, whose first
+  sample entry's four-character type *is* the codec. Only each box's own header
+  is read, which is what makes this a header read and not a file read: `moov`
+  sits after the `mdat` of anything written without fast-start, so a prefix of
+  the file would not hold it, and the walk seeks instead. Only the ISOBMFF
+  containers are read at all (`videoCodecSniffable`: `mp4`, `m4v`, `mov`) —
+  those are the ones that carry such a stream, while the other containers
+  Chromium demuxes hold the codecs its own parsers were written for — and
+  nothing that fails on the way (a header that will not parse, no video track
+  where it looks, a file that has gone) is an error: it answers null, which is
+  not an accusation, and the file is served as it stands. What counts as
+  decodable is `DECODABLE_VIDEO_CODECS` (`avc1`/`avc3`, `vp08`/`vp09`, `av01`),
+  and `codecNeedsTranscode` is the question both sides ask. It is deliberately
+  *not* asked of the media stack: `canPlayType` answers "probably" for HEVC on
+  this machine and then never produces a frame.
+  Both sides have to know, because a clip that needs an encode is a *stream*:
+  `from` is what seeks it and `fs:video-duration` is what can say how long it
+  is, so `PreviewTarget.encode` carries the answer for the URL, the clock and
+  the seek alike. The renderer fills it from `fs:video-codec`, asked by
+  `probeVideoCodec` on the cursor move itself — a header read in main, memoized
+  there by path/size/mtime, so the pane's question and the stream's own request
+  share one read — and held in a reactive map keyed by path *and* size/mtime, so
+  an answer that lands while the cursor is already on the row re-derives the
+  target through the same `previewTargetFor`: the element is remounted on the
+  other URL, or — a display already playing — carries on from where it was. The
+  flag travels with the `StageRequest`, so the pane showing a display is told how
+  to play it by the pane that asked. With no ffmpeg to encode it, such a file is
+  not media at all: `Enter` opens it in the system player, exactly as an AVI with
+  no ffmpeg is. That verdict only settles once the header has been read, so its
+  footer preview can collapse a moment after the row's extension claimed it —
+  which is the one price of asking the file instead of its name.
 - **Intercepted keys must `stopPropagation`, not just `preventDefault`.** xterm
   handles keys from a capture listener on its own textarea and does *not* consult
   `defaultPrevented`, so a merely-prevented navigation key is still forwarded to

@@ -38,6 +38,46 @@ const TRANSCODE_EXTENSIONS = new Set([
 ])
 
 /**
+ * Extensions whose video codec only the file's own header can tell: the ISOBMFF
+ * containers, which is where a stream Chromium cannot decode turns up inside a
+ * container Chromium demuxes — a phone's HEVC `.mp4`, a camera's `.mov`. The
+ * other containers Chromium demuxes hold the codecs its own parsers were written
+ * for, so there is nothing about one of them to ask the file.
+ */
+const SNIFFABLE_EXTENSIONS = new Set(['mp4', 'm4v', 'mov'])
+
+/**
+ * Whether a name is one whose stream has to be read out of its header before it
+ * is known to be playable. Shared so the renderer asks about, and main reads,
+ * exactly the same files — the containers that carry a codec no name can tell.
+ */
+export function videoCodecSniffable(name: string): boolean {
+  const extension = extensionOf(name)
+  return extension !== null && SNIFFABLE_EXTENSIONS.has(extension)
+}
+
+/**
+ * The video codecs Chromium's own media stack decodes: H.264 under both of its
+ * sample-entry spellings, VP8, VP9 and AV1. Everything else a container can
+ * hold — the HEVC of a phone recording, ProRes, Dolby Vision, MPEG-4 part 2 —
+ * is a stream Chromium demuxes but cannot decode, and one it decodes only
+ * through a platform decoder is no use either: on Linux that decoder *is* the
+ * hardware one this app turns off (see `src/main/index.ts`), which is where an
+ * HEVC `.mp4` ends up playing its sound over a black picture.
+ */
+const DECODABLE_VIDEO_CODECS = new Set(['avc1', 'avc3', 'vp08', 'vp09', 'av01'])
+
+/**
+ * Whether a stream inside a container Chromium demuxes has to be encoded for
+ * it to play. Null is not an accusation: a codec this cannot name — a header
+ * it could not read, a file whose video track is not where it looked — leaves
+ * the file served as it stands, exactly as it was before anything was sniffed.
+ */
+export function codecNeedsTranscode(codec: string | null): boolean {
+  return codec !== null && !DECODABLE_VIDEO_CODECS.has(codec)
+}
+
+/**
  * The URL scheme a pane's video preview streams through. The file is never
  * handed over whole — a preview plays a clip, and the file can be a hundred
  * megabytes — so main serves it as a ranged stream and the media element fetches

@@ -2,7 +2,14 @@ import { createReadStream, promises as fs, type Stats } from 'node:fs'
 import { Readable } from 'node:stream'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { ipcMain, protocol } from 'electron'
-import { MEDIA_SCHEME, needsTranscode, videoMimeFor } from '@shared/video'
+import {
+  codecNeedsTranscode,
+  MEDIA_SCHEME,
+  needsTranscode,
+  videoCodecSniffable,
+  videoMimeFor
+} from '@shared/video'
+import { videoCodecOf } from './videoCodec'
 
 /**
  * A range of bytes a media element asked for.
@@ -348,9 +355,17 @@ async function videoDuration(target: string): Promise<number | null> {
  * Answer whether this build can transcode, which is what decides whether a
  * container Chromium has nothing for is previewable at all — and, since only
  * such a clip needs its length asked of it, what it can say about durations.
+ * Beside it, what the stream inside a container Chromium *does* demux is: the
+ * one question a name cannot answer, and the one that keeps a phone's HEVC
+ * `.mp4` from being served as a file nothing can decode.
  */
 export function registerMediaHandlers(): void {
   ipcMain.handle('fs:can-transcode', () => ffmpegAvailable())
+  ipcMain.handle('fs:video-codec', async (_event, target: string): Promise<string | null> => {
+    if (typeof target !== 'string' || target.length === 0) return null
+    if (!videoCodecSniffable(target)) return null
+    return videoCodecOf(target)
+  })
   ipcMain.handle('fs:video-duration', async (_event, target: string): Promise<number | null> => {
     if (typeof target !== 'string' || target.length === 0) return null
     if (!(await ffmpegAvailable())) return null
@@ -363,7 +378,25 @@ export function registerMediaHandlers(): void {
 }
 
 /**
- * Serve a previewable video. A clip Chromium demuxes and decodes goes over as
+ * The encode part of serving a preview: refused when there is no ffmpeg to do
+ * it with, and otherwise the clip from the position asked for to its end.
+ */
+async function serveEncoded(target: string, method: string, url: URL): Promise<Response> {
+  if (!(await ffmpegAvailable())) {
+    return new Response('No transcoder available', { status: 501 })
+  }
+
+  // A position past the end would be a stream with nothing in it, so the
+  // length is asked of the file — once per file, and only when a request
+  // arrives with a position in it at all.
+  const wanted = startOffsetFromUrl(url)
+  const length = wanted > 0 ? await videoDuration(target) : null
+  const from = length !== null ? Math.min(wanted, Math.max(0, length - 0.25)) : wanted
+  return serveTranscode(target, from, method)
+}
+
+/**
+ * Serve a previewable video. A clip Chromium demuxes *and* decodes goes over as
  * its own bytes, ranged; anything else only ffmpeg can make playable is
  * transcoded first, and refused outright when there is no ffmpeg to do it with.
  * Either way only regular files with a previewable extension are served, so this
@@ -375,8 +408,12 @@ export function registerMediaProtocol(): void {
     if (target === null) return new Response('Bad request', { status: 400 })
 
     const mime = videoMimeFor(target)
-    const transcode = mime === null && needsTranscode(target)
-    if (mime === null && !transcode) return new Response('Not previewable', { status: 403 })
+    // Whether the extension alone names a container Chromium has nothing for,
+    // which needs no reading to know: nothing inside it could be playable.
+    const byExtension = mime === null
+    if (byExtension && !needsTranscode(target)) {
+      return new Response('Not previewable', { status: 403 })
+    }
 
     let stats: Stats
     try {
@@ -386,19 +423,17 @@ export function registerMediaProtocol(): void {
       return new Response('Not found', { status: 404 })
     }
 
-    const rangeHeader = request.headers.get('range')
-    if (mime !== null) return serveFile(target, mime, stats.size, rangeHeader, request.method)
+    // A container Chromium demuxes is still not on its own playable: the stream
+    // inside it has to be one Chromium decodes, and only ITS header can say so —
+    // a phone's `.mp4` is HEVC as often as it is H.264, and the HEVC plays its
+    // sound over a black picture. Only the containers that can hold such a
+    // stream are read; the rest carry what Chromium's own parsers were written
+    // for, and are served as they stand.
+    const encode =
+      byExtension ||
+      (videoCodecSniffable(target) && codecNeedsTranscode(await videoCodecOf(target)))
+    if (encode) return serveEncoded(target, request.method, new URL(request.url))
 
-    if (!(await ffmpegAvailable())) {
-      return new Response('No transcoder available', { status: 501 })
-    }
-
-    // A position past the end would be a stream with nothing in it, so the
-    // length is asked of the file — once per file, and only when a request
-    // arrives with a position in it at all.
-    const wanted = startOffsetFromUrl(new URL(request.url))
-    const length = wanted > 0 ? await videoDuration(target) : null
-    const from = length !== null ? Math.min(wanted, Math.max(0, length - 0.25)) : wanted
-    return serveTranscode(target, from, request.method)
+    return serveFile(target, mime, stats.size, request.headers.get('range'), request.method)
   })
 }

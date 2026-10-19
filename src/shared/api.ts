@@ -36,11 +36,19 @@ export interface BipaneFsApi {
    */
   imageSize(target: string): Promise<PixelSize | null>
   /**
-   * Whether main can transcode a clip Chromium has no decoder or demuxer for
-   * (an old camcorder AVI, a WMV). False without ffmpeg on the machine, in
-   * which case those files are not previewable and are simply opened instead.
+   * Whether main can transcode a clip Chromium has no decoder for or no
+   * demuxer for (an old camcorder AVI, a WMV, the HEVC of a phone's `.mp4`).
+   * False without ffmpeg on the machine, in which case those files are not
+   * previewable and are simply opened instead.
    */
   canTranscode(): Promise<boolean>
+  /**
+   * The video codec inside a container Chromium demuxes (`mp4`, `m4v`, `mov`),
+   * read from the file's header without decoding anything. Null when the file
+   * is not such a container or its header does not say — nothing known against
+   * it, so it is served as it stands.
+   */
+  videoCodec(target: string): Promise<string | null>
   /**
    * How long the clip a preview of this file would play is — its own length, or
    * as much of it as an encode covers — or null when nothing can say. Only a
