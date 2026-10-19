@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ComponentPublicInstance } from 'vue'
 import type { PaneController, ScrollAlign } from '@renderer/composables/useDirectory'
+import { isRunnable } from '@renderer/lib/executable'
 import {
   formatDuration,
   formatExactDate,
@@ -2188,6 +2189,18 @@ function metaClass(index: number): string {
 }
 
 /**
+ * The name's own color. A mark wins over everything — the user named that row,
+ * so it has to go on reading as marked — and otherwise a file the user can run
+ * takes the green of `--color-runnable` (lib/executable.ts).
+ */
+function nameClass(index: number): string {
+  const entry = props.controller.state.entries[index]
+  if (!entry) return ''
+  if (props.controller.isSelected(entry)) return 'text-selected'
+  return isRunnable(entry) ? 'text-runnable' : ''
+}
+
+/**
  * In-place rename. The input is rendered only for the entry the controller is
  * editing, but it lives inside the v-for, so a string ref would collect an
  * array — a function ref keeps a single element handle. Focus and select the
@@ -2347,7 +2360,7 @@ function onRenameBlur(): void {
           <span
             v-else
             class="min-w-0 flex-1 truncate"
-            :class="controller.isSelected(entry) ? 'text-selected' : ''"
+            :class="nameClass(index)"
             @click="onNameClick(index, $event)"
             >{{ entry.name }}</span
           >

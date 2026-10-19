@@ -485,21 +485,37 @@ const FILENAME_ICONS: Record<string, IconName> = {
   pkgbuild: 'config'
 }
 
-function iconByName(name: string): FileIcon {
+function iconNameFor(name: string): IconName | null {
   const lower = name.toLowerCase()
 
   const exact = FILENAME_ICONS[lower]
-  if (exact) return ICONS[exact]
+  if (exact) return exact
 
-  if (lower === '.env' || lower.startsWith('.env.')) return ICONS.config
+  if (lower === '.env' || lower.startsWith('.env.')) return 'config'
 
   const dot = lower.lastIndexOf('.')
   if (dot > 0 && dot < lower.length - 1) {
     const match = EXTENSION_ICONS[lower.slice(dot + 1)]
-    if (match) return ICONS[match]
+    if (match) return match
   }
 
-  return ICONS.text
+  return null
+}
+
+function iconByName(name: string): FileIcon {
+  const match = iconNameFor(name)
+  return match ? ICONS[match] : ICONS.text
+}
+
+/**
+ * Whether the table recognizes this name at all — its filename, or the text
+ * after its last dot. An answer of `false` is not "a text file": it is a name
+ * the table has nothing to say about, which is what a compiled binary with no
+ * extension is (`lib/executable.ts` asks, to tell a program from a file of a
+ * kind that is merely executable).
+ */
+export function isKnownName(name: string): boolean {
+  return iconNameFor(name) !== null
 }
 
 export function iconForEntry(entry: PaneEntry): FileIcon {

@@ -74,6 +74,9 @@ src/renderer/src/composables/useShell.ts     createShell(id): one shell session
                                              (own process, buffer, cwd, line model)
 src/renderer/src/composables/useDirectory.ts per-pane navigation state + actions
 src/renderer/src/lib/format.ts               size/date/permission formatting
+src/renderer/src/lib/executable.ts           what a row's green name means: a file with an
+                                             exec bit whose name the icon table does not
+                                             already know as data
 src/renderer/src/lib/preview.ts              what a row is previewable as (image or
                                              video), keyed by content, where a
                                              playing clip has got to (PlaybackClock),
@@ -227,6 +230,18 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   mutes the panes at the shell's directory from a submitted command until it
   finishes and settles. A download in another directory, or one that starts
   after the tail, still sweeps; so does `Ctrl+R`.
+- **A file the user can run is named in green.** The rule is `isRunnable` in
+  `lib/executable.ts`, and it needs both halves: an exec bit on a regular file,
+  *and* a name the icon table has not already recognized as data. So a screenshot
+  that happens to be `+x`, a `.deb`, and every directory (all directories are
+  executable) keep their ordinary color, while a compiled binary with no
+  extension and a `libfoo.so.2` are named in green — the latter because the test
+  is on the extension the icon table would use, and its last dotted part names
+  nothing. The color is `text-runnable` (`main.css`, `--color-runnable`), and it
+  goes on the row's *name span* by way of `nameClass`, not on the row: the icon
+  keeps the color its own type gives it, the size and date beside the name stay
+  dim, and a marked row keeps its own yellow — the user named that row, so it has
+  to go on reading as marked.
 - **A pane footer previews the image under its cursor.** The footer grows to
   fit a thumbnail read through `fs:read-image`, which is the only way to show a
   file the renderer has no URL for: the extension->MIME map lives in
