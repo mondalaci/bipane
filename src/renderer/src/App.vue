@@ -1155,10 +1155,17 @@ onBeforeUnmount(() => {
          covers the panes and the terminal but leaves the title bar visible.
          `grow` keeps the panes' terminal-driven flex behaviour. -->
     <div class="relative flex min-h-0 grow flex-col">
+      <!-- `isolate` keeps the panes' own z-ranks inside the row, but that also
+           confines the full-screen display (`fixed inset-0 z-50` inside a pane):
+           as a non-positioned element the row would be painted *before* the
+           terminal that follows it, so the display could not cover the command
+           line. `relative z-10` makes the row one positioned stacking context
+           that paints over the terminal, while staying under the viewer (`z-20`,
+           a later sibling) and the dialogs (`z-50`). -->
       <main
         ref="panelHost"
         tabindex="-1"
-        class="isolate flex min-h-0 shrink basis-0 overflow-hidden outline-none transition-[flex-grow] duration-150 ease-out"
+        class="relative isolate z-10 flex min-h-0 shrink basis-0 overflow-hidden outline-none transition-[flex-grow] duration-150 ease-out"
         :class="terminalExpanded ? 'grow-0' : 'grow'"
       >
         <FilePanel

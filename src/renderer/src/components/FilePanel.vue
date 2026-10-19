@@ -2332,7 +2332,11 @@ function onRenameBlur(): void {
       @contextmenu.prevent
       @wheel="onStageWheel"
     >
-      <div v-if="shownStage" class="flex min-h-0 grow flex-col p-3">
+      <div
+        v-if="shownStage"
+        class="flex min-h-0 grow flex-col"
+        :class="fullscreenPresentation ? '' : 'p-3'"
+      >
         <div ref="stageArea" class="relative flex min-h-0 grow items-center justify-center">
           <div
             v-if="showStageVideo"

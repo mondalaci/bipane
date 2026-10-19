@@ -474,7 +474,12 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   layout until the dismissal has landed (`fullscreenPresentation` latches past
   the `fullscreen` prop, which `Ctrl+Enter`-back-to-the-pane clears at once but
   Escape does not): snapping the overlay back to its pane under the shrinking
-  picture would resize the media out from under its own animation.
+  picture would resize the media out from under its own animation. The pane row
+  is `isolate` *and* `relative z-10`: isolation confines the panes' own z-ranks
+  to the row, but it also confines the fixed overlay that lives inside a pane, so
+  the row must itself be a positioned stacking context — a non-positioned row is
+  painted before the terminal that follows it, and the overlay then sits under
+  the command line instead of over it.
 - **A clip Chromium cannot play is transcoded, when ffmpeg is there to do it.**
   Chromium has no demuxer for AVI or ASF, and no decoder for the motion JPEG of
   an old camcorder AVI or the WMV3/VC-1 of an ASF one — `canPlayType` answers no
