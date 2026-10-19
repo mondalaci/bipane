@@ -2,7 +2,13 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ComponentPublicInstance } from 'vue'
 import type { PaneController, ScrollAlign } from '@renderer/composables/useDirectory'
-import { formatDate, formatDuration, formatMode, formatSize } from '@renderer/lib/format'
+import {
+  formatDuration,
+  formatExactDate,
+  formatMode,
+  formatRelativeDate,
+  formatSize
+} from '@renderer/lib/format'
 import {
   previewKeyFor,
   previewTargetFor,
@@ -2182,8 +2188,12 @@ function onRenameBlur(): void {
           >
             {{ entry.kind === 'directory' ? '' : formatSize(entry.size) }}
           </span>
-          <span class="w-28 shrink-0 text-right tabular-nums" :class="metaClass(index)">
-            {{ entry.isParent ? '' : formatDate(entry.mtimeMs) }}
+          <span
+            class="w-28 shrink-0 text-right tabular-nums"
+            :class="metaClass(index)"
+            :title="entry.isParent ? undefined : formatExactDate(entry.mtimeMs)"
+          >
+            {{ entry.isParent ? '' : formatRelativeDate(entry.mtimeMs) }}
           </span>
         </li>
       </ul>
@@ -2287,7 +2297,9 @@ function onRenameBlur(): void {
             <span class="tabular-nums">
               {{ entry.kind === 'directory' ? 'dir' : formatSize(entry.size) }}
             </span>
-            <span class="hidden tabular-nums lg:inline">{{ formatDate(entry.mtimeMs) }}</span>
+            <span class="hidden tabular-nums lg:inline" :title="formatExactDate(entry.mtimeMs)">{{
+              formatRelativeDate(entry.mtimeMs)
+            }}</span>
           </template>
 
           <span v-if="selectedCount > 0" class="tabular-nums text-selected">

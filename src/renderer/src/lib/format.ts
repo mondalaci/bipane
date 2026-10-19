@@ -38,39 +38,48 @@ export function formatSize(bytes: number): string {
   return `${value.toFixed(decimals)} ${SIZE_UNITS[unit]}`
 }
 
-const timeFormatter = new Intl.DateTimeFormat(undefined, {
-  hour: '2-digit',
-  minute: '2-digit',
-  hour12: false
-})
+const relativeFormatter = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
 
-const dayFormatter = new Intl.DateTimeFormat(undefined, {
-  day: '2-digit',
-  month: 'short',
-  hour: '2-digit',
-  minute: '2-digit',
-  hour12: false
-})
+const RELATIVE_DIVISIONS: { amount: number; unit: Intl.RelativeTimeFormatUnit }[] = [
+  { amount: 60, unit: 'second' },
+  { amount: 60, unit: 'minute' },
+  { amount: 24, unit: 'hour' },
+  { amount: 7, unit: 'day' },
+  { amount: 4.34524, unit: 'week' },
+  { amount: 12, unit: 'month' },
+  { amount: Number.POSITIVE_INFINITY, unit: 'year' }
+]
 
-const fullFormatter = new Intl.DateTimeFormat(undefined, {
+/**
+ * How long ago a file was modified, as `2 hours ago` / `yesterday` / `last
+ * month` — the listing's own sense of time, which cares about the order of
+ * events rather than their exact instant. The exact timestamp is one hover
+ * away (`formatExactDate`).
+ */
+export function formatRelativeDate(mtimeMs: number): string {
+  let duration = (mtimeMs - Date.now()) / 1000
+
+  for (const { amount, unit } of RELATIVE_DIVISIONS) {
+    if (Math.abs(duration) < amount) return relativeFormatter.format(Math.round(duration), unit)
+    duration /= amount
+  }
+
+  return ''
+}
+
+const exactFormatter = new Intl.DateTimeFormat(undefined, {
   year: 'numeric',
+  month: 'short',
   day: '2-digit',
-  month: 'short'
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: false
 })
 
-export function formatDate(mtimeMs: number): string {
-  const date = new Date(mtimeMs)
-  const now = new Date()
-
-  const sameDay =
-    date.getFullYear() === now.getFullYear() &&
-    date.getMonth() === now.getMonth() &&
-    date.getDate() === now.getDate()
-  if (sameDay) return timeFormatter.format(date)
-
-  if (date.getFullYear() === now.getFullYear()) return dayFormatter.format(date)
-
-  return fullFormatter.format(date)
+/** The timestamp behind a relative date, for the hover tooltip. */
+export function formatExactDate(mtimeMs: number): string {
+  return exactFormatter.format(new Date(mtimeMs))
 }
 
 const PERMISSION_SYMBOLS = [
