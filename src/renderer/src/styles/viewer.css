@@ -1,0 +1,11 @@
+/*
+ * The read-only viewer has no cursor. Its vertical keys scroll the document
+ * rather than walk a caret down it (see FileViewer.vue), so a blinking caret
+ * would be a mark that drifts out of the picture as the view moves and points
+ * at nothing. Monaco draws it in the cursors layer, which is all there is to
+ * hide: the selection highlight lives in another layer and still follows the
+ * mouse, so text can be selected and copied as before.
+ */
+.viewer-no-cursor .cursors-layer {
+  display: none;
+}

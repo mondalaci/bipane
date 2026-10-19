@@ -3,6 +3,7 @@
 @import './flash.css';
 @import './osd.css';
 @import './swap.css';
+@import './viewer.css';
 
 @theme {
   --color-bg: #1e1e1e;

@@ -127,10 +127,38 @@ onMounted(async () => {
     minimap: { enabled: true },
     scrollBeyondLastLine: false,
     renderWhitespace: 'selection',
+    // A viewer has no caret to point the current line out with (see below), so
+    // the highlight would sit on a line nothing is on.
+    renderLineHighlight: editable.value ? 'line' : 'none',
     stickyScroll: { enabled: false },
     smoothScrolling: true,
     padding: { top: 6, bottom: 6 }
   })
+
+  if (!editable.value) {
+    // Viewing has no cursor — the caret is hidden by CSS (styles/viewer.css) —
+    // so the vertical keys are a viewer's rather than an editor's: the arrows
+    // walk the document a line at a time, the pages a screenful, and Home/End
+    // go to its ends. Left as Monaco's own, they would move a caret the user
+    // cannot see, and the view would not begin to move until that caret had
+    // walked past the bottom of the screen.
+    const scroll = (handler: string) => (): void => {
+      editor?.trigger('viewer', handler, null)
+    }
+    const verticalKeys: Array<[number, string]> = [
+      [monaco.KeyCode.UpArrow, 'scrollLineUp'],
+      [monaco.KeyCode.DownArrow, 'scrollLineDown'],
+      [monaco.KeyCode.PageUp, 'scrollPageUp'],
+      [monaco.KeyCode.PageDown, 'scrollPageDown'],
+      [monaco.KeyCode.Home, 'scrollEditorTop'],
+      [monaco.KeyCode.End, 'scrollEditorBottom']
+    ]
+    // 'textInputFocus' keeps these off the find box, exactly as Monaco's own
+    // core navigation does.
+    for (const [key, handler] of verticalKeys) {
+      editor.addCommand(key, scroll(handler), 'textInputFocus')
+    }
+  }
 
   changeSubscription = model.onDidChangeContent(() => {
     dirty.value = true
@@ -258,7 +286,7 @@ defineExpose({ confirmClose })
       >
         {{ error }}
       </p>
-      <div v-else ref="host" class="h-full w-full"></div>
+      <div v-else ref="host" class="h-full w-full" :class="{ 'viewer-no-cursor': !editable }"></div>
 
       <p
         v-if="loading"

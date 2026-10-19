@@ -571,7 +571,20 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   editor's container out of the DOM — using it would unmount the very buffer the
   user is still editing. A file the read had to truncate is refused for editing
   outright: saving it back would write only the first 8 MiB and silently destroy
-  the tail.
+  the tail. **Viewing (F3) has no cursor, because its keys are a viewer's and not
+  an editor's**: the arrows scroll the document a line at a time, the pages a
+  screenful, and `Home`/`End` jump to its ends, instead of walking an invisible
+  caret that would keep the view still until it had passed the bottom of the
+  screen. The remap is `editor.addCommand(...)` at the core commands' own
+  `scroll*` ids (`scrollLineUp`/`scrollLineDown`/`scrollPageUp`/`scrollPageDown`/
+  `scrollEditorTop`/`scrollEditorBottom`), gated on `'textInputFocus'` so it stays
+  out of the find box the way Monaco's core navigation does, and only in view
+  mode — F4 keeps the caret. The caret itself is hidden by
+  `styles/viewer.css` (`.viewer-no-cursor .cursors-layer { display: none }`, the
+  host carrying that class only when read-only), which leaves the selection
+  highlight — a different layer — so the mouse still selects and copies; the
+  current-line highlight goes too, via `renderLineHighlight: 'none'`, since with
+  no caret there is nothing for it to point out.
 - **Monaco is imported only when the viewer first opens**, and its workers are
   answered by `MonacoEnvironment.getWorker` with Vite `?worker` imports in
   `lib/monaco.ts`. Monaco 0.57 otherwise builds its workers from
