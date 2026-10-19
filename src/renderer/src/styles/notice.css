@@ -1,0 +1,46 @@
+/*
+ * The pane's notice — a refused F3/F4 on a binary file, a failed copy, a
+ * directory that would not list — descends into place rather than appearing, and
+ * ascends back out rather than vanishing, so Escape reads as putting it away.
+ * The room it needs is the layout's the moment it is in the DOM, so the listing
+ * below is pushed down by that, not by this animation: what moves here is the
+ * message's own box, inside a window of exactly its height, so it travels in and
+ * out from behind the path bar instead of over it. (The window is `overflow:
+ * hidden` around the animated element, which is why the element and not the
+ * wrapper carries the animation: a moving window would take the clip with it.)
+ *
+ * Fast on purpose: a notice is news, and a slow one would be a wait before the
+ * keys work again. The message is keyed by its text, so a new one is a new
+ * element — it ascends and the next descends, out-in (`Transition` in
+ * FilePanel) — while a repeat of the same message is the same notice still
+ * standing and does not re-announce itself.
+ */
+.notice-enter-active {
+  animation: notice-drop 140ms ease-out both;
+}
+
+.notice-leave-active {
+  animation: notice-rise 140ms ease-in both;
+}
+
+@keyframes notice-drop {
+  from {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes notice-rise {
+  from {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+}

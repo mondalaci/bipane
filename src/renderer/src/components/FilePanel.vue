@@ -2357,13 +2357,21 @@ function onRenameBlur(): void {
         </span>
       </div>
 
-      <p
-        v-if="notice"
-        class="shrink-0 px-3 py-2 text-ui"
-        :class="notice.error ? 'text-danger' : 'text-fg-dim'"
-      >
-        {{ notice.text }}
-      </p>
+      <!-- The window is always there and only clips: the message inside it is
+           what travels (see styles/notice.css). Keyed on its text so a new
+           notice replaces the old one through the animation. -->
+      <div class="shrink-0 overflow-hidden">
+        <Transition name="notice" mode="out-in">
+          <p
+            v-if="notice"
+            :key="notice.text"
+            class="px-3 py-2 text-ui"
+            :class="notice.error ? 'text-danger' : 'text-fg-dim'"
+          >
+            {{ notice.text }}
+          </p>
+        </Transition>
+      </div>
 
       <ul ref="listEl" class="min-h-0 flex-1 overflow-y-auto" :style="listSlackStyle">
         <li

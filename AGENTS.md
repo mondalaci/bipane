@@ -195,6 +195,22 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
 - **The pane's row list must contain only entries.** A status message rendered
   as a sibling `<li>` shifts every index, which silently breaks cursor scrolling
   and page jumps; `FilePanel` renders that notice as a sibling of the `<ul>`.
+  That notice *travels* (`styles/notice.css`): it descends into place, and
+  ascends back out when Escape puts it away — the gesture reads as taking the
+  message away rather than as the message vanishing. It moves inside a window of
+  its own height, an `overflow: hidden` box that is always there, and the
+  animated element is the message rather than that window: a moving window would
+  carry the clip with it. The room the notice takes is the layout's the moment it
+  is in the DOM, so the listing is pushed down by the mount and not by the
+  animation, and the message comes down from behind the path bar instead of over
+  it; the room is released when the ascent is over, which needs no reveal —
+  `onListResize` moves the view only for the footer's own height, and a listing
+  that regained room is left alone. The travel is the *message's* alone: animating
+  the room instead would drag the rows down under a cursor sitting behind the
+  animation, the same reason the footer strip snaps smaller. The message is keyed
+  by its text, so a new one replaces the old through the animation (out-in: the
+  old ascends, the next descends) while a repeat of an identical one is the same
+  notice still standing and does not re-announce itself.
 - **The panel and the shell keep their cwd in sync in both directions**, which
   is why it needs a guard: the shell's cwd is *polled* (300ms), so a read can be
   stale for a moment after we inject a `cd`. `pendingPush` in `useWorkspace.ts`
