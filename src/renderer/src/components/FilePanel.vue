@@ -2406,7 +2406,7 @@ function onRenameBlur(): void {
       </div>
 
       <div
-        class="flex h-6 shrink-0 items-center border-b border-border-subtle bg-bg px-3 text-ui-sm text-fg-dim"
+        class="pane-header-gutter flex h-6 shrink-0 items-center gap-2 border-b border-border-subtle bg-bg pl-3 text-ui-sm text-fg-dim"
       >
         <span class="min-w-0 flex-1">Name</span>
         <span class="w-16 shrink-0 text-right">Size</span>
@@ -2470,7 +2470,7 @@ function onRenameBlur(): void {
            scroll-into-view all measure the whole listing as if it were there. -->
       <ul
         ref="listEl"
-        class="min-h-0 flex-1 overflow-y-auto"
+        class="pane-scrollbar min-h-0 flex-1 overflow-y-auto"
         :style="listSlackStyle"
         @scroll="onListScroll"
       >

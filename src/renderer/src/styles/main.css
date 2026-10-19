@@ -49,11 +49,30 @@
   -webkit-app-region: no-drag;
 }
 
+/* A pane's column headers sit outside its scrolling listing, so the scrollbar
+   the rows are inset by is nothing the header knows about. `stable` reserves
+   the gutter whether or not the listing overflows — so the columns line up with
+   and without a scrollbar — and the header is given the same gutter by
+   `pane-header-gutter`, which is its own `px-3` plus that reserved width. */
+@utility pane-scrollbar {
+  scrollbar-gutter: stable;
+}
+
+@utility pane-header-gutter {
+  padding-right: calc(0.75rem + var(--scrollbar-width));
+}
+
 @layer base {
   html,
   body,
   #app {
     height: 100%;
+  }
+
+  :root {
+    /* The classic scrollbar's width, in one place: the scrollbar draws at it
+       and a pane's headers reserve it (see `pane-header-gutter`). */
+    --scrollbar-width: 10px;
   }
 
   body {
@@ -78,8 +97,8 @@
   }
 
   ::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+    width: var(--scrollbar-width);
+    height: var(--scrollbar-width);
   }
 
   ::-webkit-scrollbar-track {
