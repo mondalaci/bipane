@@ -2397,20 +2397,21 @@ function onRenameBlur(): void {
             @click.stop
             @dblclick.stop
           />
-          <span
-            v-else
-            class="min-w-0 flex-1 truncate"
-            :class="nameClass(index)"
-            @click="onNameClick(index, $event)"
-            >{{ entry.name }}</span
-          >
+          <span v-else class="flex min-w-0 flex-1 items-center gap-2">
+            <span
+              class="min-w-0 shrink truncate"
+              :class="nameClass(index)"
+              @click="onNameClick(index, $event)"
+              >{{ entry.name }}</span
+            >
 
-          <span
-            v-if="entry.isSymlink && entry.symlinkTarget"
-            class="max-w-40 shrink-0 truncate font-mono text-ui-sm text-fg-dim"
-            :title="entry.symlinkTarget"
-          >
-            → {{ entry.symlinkTarget }}
+            <span
+              v-if="entry.isSymlink && entry.symlinkTarget"
+              class="min-w-0 shrink truncate text-ui-sm text-fg-dim"
+              :title="entry.symlinkTarget"
+            >
+              → {{ entry.symlinkTarget }}
+            </span>
           </span>
 
           <span class="w-16 shrink-0 text-right tabular-nums" :class="metaClass(index)">
