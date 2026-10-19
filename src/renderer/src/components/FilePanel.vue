@@ -498,11 +498,29 @@ let stageAnimation = -1
 /** The element being displayed, for measuring the reveal and its reverse. */
 const stageMedia = ref<HTMLImageElement | HTMLVideoElement | null>(null)
 
+/**
+ * The window the display sits on when it is opened over everything; with the
+ * display in its pane, the pane's own listing is what it sits on. It is laid out
+ * window-sized whichever way the display is presented, because its fade — out, as
+ * the media settles back into its pane — has to go on covering what the media is
+ * still hanging over at the time.
+ */
+const stageBackdrop = ref<HTMLElement | null>(null)
+
 /** The dismissal in flight, so that a display asked for again can call it off. */
 let stageDismissal: Animation | null = null
 
 /** The transport bar's own flight, so a reveal and a dismissal replace rather than stack. */
 let stageBarFlight: Animation | null = null
+
+/**
+ * The media's own flight, so that a change of presentation replaces a reveal in
+ * flight rather than stacking a second motion on the same picture.
+ */
+let stageMediaFlight: Animation | null = null
+
+/** The backdrop's fade in flight, replaced rather than stacked by the next one. */
+let stageBackdropFade: Animation | null = null
 
 /** Whether a dismissal is running, so that its gesture is neither doubled nor cut short. */
 let stageDismissing = false
@@ -607,24 +625,158 @@ function clearStageClock(): void {
  */
 const fullscreenPresentation = ref(false)
 
+/**
+ * Whether the display is on its way between the two boxes, which it is for the
+ * length of that motion. It rides above the pane chrome while it travels —
+ * above the divider that splits the panes, which is a `z-30` layer over their
+ * `z-20` ones — because the picture hangs over the other pane on the way and
+ * nothing of the panes should be drawn across it. At rest it is a `z-20` layer
+ * like any other pane overlay, which is what lets the divider's grab band and
+ * its re-centre button take a pointer at the pane's edge.
+ */
+const stageTravelling = ref(false)
+
+/** Which travel is the current one, so a landed or called-off one ends only itself. */
+let stageTravelToken = 0
+
+/**
+ * Where the display is laid out and how high it rides while it is there: over
+ * everything as a full-screen display, or in its pane — above the pane chrome
+ * while it is travelling, at the pane's own rank once it has settled.
+ */
+const stagePresentation = computed(() =>
+  fullscreenPresentation.value
+    ? 'fixed inset-0 z-50'
+    : stageTravelling.value
+      ? 'absolute inset-0 z-40'
+      : 'absolute inset-0 z-20'
+)
+
 watch(
   () => props.fullscreen === true,
   (on) => {
+    // A display that is up and stays up only changes its presentation, and the
+    // media travels between the two boxes to show it.
+    if (props.stage !== null) {
+      void switchStagePresentation(on)
+      return
+    }
+
     if (on) {
+      // Nothing up yet: the mode is being entered, and the reveal out of the
+      // thumbnail is that gesture — this only lays the display out over the
+      // window for it.
       fullscreenPresentation.value = true
       return
     }
 
-    // The layout is held for exactly one case: the mode is being left
-    // (`props.stage` is null) while this pane still has a display to shrink back
-    // — then `runDismissal` clears it once the shrink has landed. Anything else
-    // drops it at once: a display that stays up with only its presentation
-    // changing (Ctrl+Enter back to the pane), and the pane that is not the
-    // display at all — which is handed the same `fullscreen` flag but has no
-    // overlay to lay out.
-    if (shownStage.value === null || props.stage !== null) fullscreenPresentation.value = false
+    // The layout is held for exactly one case: the mode is being left while this
+    // pane still has a display to shrink back onto its thumbnail — then
+    // `runDismissal` clears it once the shrink has landed. The pane that is not
+    // the display is handed the same flag and has no overlay to lay out, so it
+    // drops it at once.
+    if (shownStage.value === null) fullscreenPresentation.value = false
   }
 )
+
+/**
+ * The presentation change of a display that stays up: it is laid out in the other
+ * box — the pane's, or the window's — and then put back onto the rectangle it
+ * occupied in the one it left, so the picture travels between the two instead of
+ * jumping from one size to the other. The transport travels with it, and the
+ * backdrop fades over the same length, so opening the display over the window and
+ * settling it back into its pane are each one gesture rather than a resize under
+ * a background that has already changed.
+ *
+ * The far end of that travel is measured rather than worked out: the media is
+ * laid out in the other box first and then measured there — which keeps a clip
+ * honest, since its box is *measured* from the area it sits in, so the new area
+ * is fed in before the media is measured. Both flushes are microtasks of one
+ * task, so the media is never painted at its new size before the motion that
+ * brings it there: there is no frame in between to flash.
+ */
+async function switchStagePresentation(full: boolean): Promise<void> {
+  const travel = (stageTravelToken += 1)
+  const settle = (): void => {
+    if (travel === stageTravelToken) stageTravelling.value = false
+  }
+
+  const element = stageMedia.value
+  const stage = shownStage.value
+  // Where the gesture starts from is whatever is on screen now, a half-finished
+  // motion included, so a second switch carries on from what the last one showed.
+  const from = element === null ? null : drawnRect(element)
+  const fromBar = stageBarEl.value?.getBoundingClientRect() ?? null
+
+  // Each flight measures the box it is about to leave, so both are called off
+  // before the layout turns: one still travelling would be measured where its
+  // transform has put it rather than where its layout is.
+  stageMediaFlight?.cancel()
+  stageMediaFlight = null
+  stageBarFlight?.cancel()
+  stageBarFlight = null
+
+  fullscreenPresentation.value = full
+  stageTravelling.value = true
+  animateStageBackdrop(full)
+
+  if (element === null || from === null) {
+    settle()
+    return
+  }
+
+  await nextTick()
+  const area = stageArea.value
+  if (area !== null) stageAreaSize.value = { width: area.clientWidth, height: area.clientHeight }
+  await nextTick()
+
+  // The display can have been asked for again, or taken away, while the layout
+  // turned: the element this gesture belongs to is the one it began on.
+  if (shownStage.value !== stage || stageMedia.value !== element) {
+    settle()
+    return
+  }
+
+  const box = element.getBoundingClientRect()
+  const drawn = drawnRect(element)
+  if (drawn === null || box.width <= 0 || box.height <= 0) {
+    settle()
+    return
+  }
+
+  const flight = element.animate(
+    [{ transform: handoffTransform(from, drawn, box) }, { transform: 'none' }],
+    { duration: STAGE_REVEAL_MS, easing: 'ease-out' }
+  )
+  stageMediaFlight = flight
+  // The rank is given back when the picture has landed, which is also what keeps
+  // it above the divider for the whole of the motion — a cancelled one included,
+  // where the switch that replaced it owns the rank from here.
+  void flight.finished.then(settle, settle)
+  void animateStageBar(fromBar, false)
+}
+
+/**
+ * Fade the window the display sits on when it is opened over everything: the
+ * colour the letterbox is filled with, and what covers the tab strip, the panes
+ * and the command line behind the media. Fading it with the media's own travel is
+ * what makes a presentation change one gesture; in the pane it is simply
+ * transparent, because the listing behind the media is the display's backdrop
+ * there.
+ */
+function animateStageBackdrop(full: boolean): void {
+  const backdrop = stageBackdrop.value
+  if (backdrop === null) return
+
+  // Read before the one in flight is called off, so the fade carries on from
+  // wherever that had got to.
+  const from = getComputedStyle(backdrop).opacity
+  stageBackdropFade?.cancel()
+  stageBackdropFade = backdrop.animate(
+    [{ opacity: from }, { opacity: full ? '1' : '0' }],
+    { duration: STAGE_REVEAL_MS, easing: full ? 'ease-out' : 'ease-in', fill: 'forwards' }
+  )
+}
 
 /**
  * Blur the pane's own content while this pane is the display, and bring it back
@@ -828,7 +980,10 @@ function onStageShown(): void {
   const drawn = drawnRect(element)
   if (!from || !drawn) return
 
-  element.animate(
+  // A presentation change replaces a reveal that is still running rather than
+  // stacking a second motion on the same picture, so this is the flight it owns.
+  stageMediaFlight?.cancel()
+  stageMediaFlight = element.animate(
     [{ transform: handoffTransform(from, drawn, element.getBoundingClientRect()) }, { transform: 'none' }],
     { duration: STAGE_REVEAL_MS, easing: 'ease-out' }
   )
@@ -887,6 +1042,11 @@ async function dismissStage(): Promise<void> {
 async function runDismissal(): Promise<void> {
   const stage = shownStage.value
   const element = stageMedia.value
+
+  // Leaving a full-screen display takes the window's backdrop with it, over the
+  // same length the picture takes to shrink back into its pane — whether or not
+  // there is anything to move, since an empty display sits on it too.
+  animateStageBackdrop(false)
 
   if (stage === null || element === null) {
     shownStage.value = null
@@ -2324,7 +2484,7 @@ function onRenameBlur(): void {
     <div
       v-if="displaying || shownStage"
       class="flex flex-col"
-      :class="fullscreenPresentation ? 'fixed inset-0 z-50 bg-bg' : 'absolute inset-0 z-20'"
+      :class="stagePresentation"
       @mousedown="onStagePointerDown"
       @mouseup="onStagePointerUp"
       @click.stop
@@ -2332,6 +2492,20 @@ function onRenameBlur(): void {
       @contextmenu.prevent
       @wheel="onStageWheel"
     >
+      <!-- What the display sits on: the pane's own listing when it is shown in its
+           pane (the strip is simply transparent there), and the window's
+           background when it is opened over everything — where it is what covers
+           the tab strip, the panes and the command line behind the media. It is
+           window-sized in either case rather than following the layout, because
+           it is faded rather than switched when the presentation changes: on the
+           way back into the pane it has to go on covering what the media is still
+           hanging over until the picture has landed. -->
+      <span
+        ref="stageBackdrop"
+        class="pointer-events-none fixed inset-0 -z-10 bg-bg"
+        :style="{ opacity: fullscreenPresentation ? 1 : 0 }"
+        aria-hidden="true"
+      ></span>
       <div
         v-if="shownStage"
         class="flex min-h-0 grow flex-col"

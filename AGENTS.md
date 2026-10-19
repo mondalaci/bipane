@@ -470,12 +470,30 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   play/pause, the wheel, the transport and the sound ramp are the same code. The
   reveal still grows out of the footer thumbnail — the source pane is behind the
   overlay, not unmounted, so its footer is still measurable — and the reverse
-  still shrinks back onto it. That is why leaving the mode holds the full-window
-  layout until the dismissal has landed (`fullscreenPresentation` latches past
-  the `fullscreen` prop, which `Ctrl+Enter`-back-to-the-pane clears at once but
-  Escape does not): snapping the overlay back to its pane under the shrinking
-  picture would resize the media out from under its own animation. The pane row
-  is `isolate` *and* `relative z-10`: isolation confines the panes' own z-ranks
+  still shrinks back onto it. A display that is already up changes *presentation*
+  rather than being entered or left, and that travels the same way
+  (`switchStagePresentation`): the media is laid out in the other box and then put
+  back onto the rectangle it had in the one it left, so the picture glides between
+  its pane and the window rather than jumping between two sizes, the transport
+  travelling with it. The far end of that travel is *measured* after the layout
+  has turned — which keeps a clip honest, since its box is measured from the area
+  it sits in, so the new area is fed in before the media is — and both flushes are
+  microtasks of one task, so the media is never painted at its new size before the
+  motion that brings it there. For the length of that motion the display counts
+  itself a `z-40` layer (`stageTravelling`), because it hangs over the other pane
+  on the way and the divider between the panes is a `z-30` one: at the pane's own
+  rank the divider would be drawn across the picture, which is what the handle
+  wants at rest (its grab band and re-centre button reach into the panes) and
+  exactly what must not happen mid-travel. What the display sits on is its own
+  always window-sized layer (`stageBackdrop`): transparent in the pane, opaque
+  over everything else, and *faded* rather than switched, because on the way back
+  into the pane it has to go on covering what the media is still hanging over
+  until the picture has landed. That is also why leaving the mode holds the full-window
+  layout until the dismissal has landed (`fullscreenPresentation` latches past the
+  `fullscreen` prop when the mode is being *left* — a presentation change, by
+  contrast, moves it at once): snapping the overlay back to its pane under the
+  shrinking picture would resize the media out from under its own animation. The
+  pane row is `isolate` *and* `relative z-10`: isolation confines the panes' own z-ranks
   to the row, but it also confines the fixed overlay that lives inside a pane, so
   the row must itself be a positioned stacking context — a non-positioned row is
   painted before the terminal that follows it, and the overlay then sits under

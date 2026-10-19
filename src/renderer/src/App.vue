@@ -1195,7 +1195,10 @@ onBeforeUnmount(() => {
              once the split has been dragged off-centre. The handle rides above
              the panes (`z-30`) because half the button overhangs one of them,
              and that pane's own overlays are `z-20` layers: under them, only the
-             half hanging over the empty side took a click. `isolate` on the row
+             half hanging over the empty side took a click. A display counts
+             itself `z-40` for the length of its travel between its pane and the
+             window, since it hangs over both panes on the way and the divider
+             would otherwise be drawn across the picture. `isolate` on the row
              above keeps that rank inside the row, so the viewer and the dialogs,
              which are outside it, still cover everything. It is drawn between
              the two panes whichever column each is in — `order` is what puts it
