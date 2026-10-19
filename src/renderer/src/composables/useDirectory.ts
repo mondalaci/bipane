@@ -664,6 +664,35 @@ export function useDirectory(side: PanelSide, options: PaneOptions): PaneControl
     // Drop the marks that are gone, keep any that failed so a retry still
     // knows what the user meant, then re-list in place.
     for (const removed of result.data.deleted) state.selected.delete(removed)
+
+    // Park the cursor on the row just before the deleted one before re-listing:
+    // `refresh` preserves the entry under the cursor by path, and that entry is
+    // gone, so without this the cursor falls back to the first match. A row the
+    // cursor was not on (marked entries deleted from elsewhere) is left alone,
+    // and deleting the first row falls forward to the next one.
+    const deleted = new Set(result.data.deleted)
+    const underCursor = state.entries[state.cursor]
+    if (underCursor && deleted.has(underCursor.path)) {
+      let anchor = -1
+      for (let i = state.cursor - 1; i >= 0; i -= 1) {
+        const row = state.entries[i]
+        if (row && !deleted.has(row.path)) {
+          anchor = i
+          break
+        }
+      }
+      if (anchor < 0) {
+        for (let i = state.cursor + 1; i < state.entries.length; i += 1) {
+          const row = state.entries[i]
+          if (row && !deleted.has(row.path)) {
+            anchor = i
+            break
+          }
+        }
+      }
+      state.cursor = anchor >= 0 ? anchor : 0
+    }
+
     await refresh()
 
     if (result.data.failed.length > 0) {
