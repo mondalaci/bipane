@@ -244,13 +244,16 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   the row go on reading as itself: the name keeps the color its kind gives it,
   including the green of something runnable, the size and the date keep the plain
   `text-fg` a filename has, and only the symlink target beside them stays dim.
-  The band beats the cursor's blue, because the mark is the stronger claim: it
-  is what F5/F6/F8 act on. A cursor left standing on a marked row would then have
-  no band of its own to show, so it takes `cursor-on-marked` (`main.css`) — the
-  same 1px accent outline the app already uses for `:focus-visible`, drawn just
-  inside the row. That is what keeps "the row I am on" and "the row I marked"
-  tellable apart when the two coincide; without it the cursor would vanish into
-  the band.
+  The band yields to the cursor's blue when the two coincide: the row then takes
+  the cursor's ordinary band (active or inactive) and its text turns the mark's
+  gold (`text-selected`, `--color-selected`). So the background keeps saying
+  where the keyboard is and the text says which rows F5/F6/F8 act on, instead of
+  the two claims competing for one band. The gold outranks even a runnable
+  name's green while the cursor is on the row — the mark is what that row has to
+  say, and a green name would be the one exception that does not — and the green
+  returns as soon as the cursor leaves. The gold reaches the size and the date
+  too. That is what keeps "the row I am on" and "the row I marked" tellable
+  apart when the two coincide.
 - **A file the user can run is named in green.** The rule is `isRunnable` in
   `lib/executable.ts`, and it needs both halves: an exec bit on a regular file,
   *and* a name the icon table has not already recognized as data. So a screenshot
@@ -263,7 +266,10 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   keeps the color its own type gives it, the size and date beside the name take
   the plain `text-fg` rather than a dim of it, and a marked row keeps the green
   too — the mark's band is a tint, so the name goes on reading in its own color
-  there.
+  there. The exception is the cursor standing on a marked row: its gold takes
+  the name as it takes the rest of the row's text (`text-selected` overrides
+  `text-runnable` in `nameClass`), and the green comes back with the cursor
+  leaving.
 - **A file the user can run is run on Enter, in the shell the panes already
   have.** `shouldExecute` (`lib/executable.ts`) is the green rule less a
   `.desktop` — that one *describes* a program, and the system is what launches

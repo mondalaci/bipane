@@ -48,18 +48,6 @@
   -webkit-app-region: no-drag;
 }
 
-/*
- * The cursor sitting on a marked row. The mark's own band wins the row's
- * background — it is the stronger claim, since it is what F5/F6/F8 act on — so
- * the cursor has no band of its own left to show, and falls back to the outline
- * this app already uses for focus (`:focus-visible`). It is drawn just inside
- * the row, since an outline has no room to grow into.
- */
-@utility cursor-on-marked {
-  outline: 1px solid var(--color-accent-strong);
-  outline-offset: -1px;
-}
-
 @layer base {
   html,
   body,

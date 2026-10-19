@@ -2186,14 +2186,19 @@ function rowClass(index: number): string {
   const cursor = index === props.controller.state.cursor
 
   // A marked row takes the gold band (`bg-marked`) and nothing else, so every
-  // text color on the row goes on reading as itself. The band wins over the
-  // cursor's blue: the mark is the stronger claim, since it is what F5/F6/F8 act
-  // on. The cursor on a marked row would then have no band left to show, so it
-  // keeps an outline inside the band.
+  // text color on the row goes on reading as itself. When the cursor lands on
+  // one, the row takes the cursor's usual band and the mark moves to the text:
+  // gold (`text-selected`) on the blue (or inactive grey) says both "this is
+  // where the keyboard is" and "this is one of the rows F5/F6/F8 act on".
   let base: string
   if (entry && props.controller.isSelected(entry)) {
-    base = 'bg-marked'
-    if (cursor) base += ' cursor-on-marked'
+    if (cursor) {
+      base = props.active
+        ? 'bg-selection text-selected'
+        : 'bg-selection-inactive text-selected'
+    } else {
+      base = 'bg-marked'
+    }
   } else if (cursor) {
     base = props.active ? 'bg-selection text-fg-bright' : 'bg-selection-inactive text-fg'
   } else {
@@ -2208,11 +2213,31 @@ function rowClass(index: number): string {
 /**
  * The name's own color: the green of a file the user can run (`--color-runnable`,
  * lib/executable.ts). A marked row keeps it — the mark's band is a tint, so the
- * name goes on reading in its own color.
+ * name goes on reading in its own color. The one exception is the cursor on a
+ * marked row: the mark has moved to the text there, and its gold outranks the
+ * green, or a runnable would be the one marked row that does not say so.
  */
 function nameClass(index: number): string {
   const entry = props.controller.state.entries[index]
-  return entry && isRunnable(entry) ? 'text-runnable' : ''
+  if (!entry) return ''
+  if (index === props.controller.state.cursor && props.controller.isSelected(entry)) {
+    return 'text-selected'
+  }
+  return isRunnable(entry) ? 'text-runnable' : ''
+}
+
+/**
+ * The size and the date. On a marked row the cursor's gold reaches them too
+ * (see `rowClass`), so the whole row's text carries the mark while the band
+ * goes on saying where the keyboard is; everywhere else they stay `text-fg`.
+ */
+function metaClass(index: number): string {
+  const entry = props.controller.state.entries[index]
+  return entry &&
+    index === props.controller.state.cursor &&
+    props.controller.isSelected(entry)
+    ? 'text-selected'
+    : 'text-fg'
 }
 
 /**
@@ -2388,11 +2413,12 @@ function onRenameBlur(): void {
             → {{ entry.symlinkTarget }}
           </span>
 
-          <span class="w-16 shrink-0 text-right tabular-nums text-fg">
+          <span class="w-16 shrink-0 text-right tabular-nums" :class="metaClass(index)">
             {{ entry.kind === 'directory' ? '' : formatSize(entry.size) }}
           </span>
           <span
-            class="w-28 shrink-0 text-right tabular-nums text-fg"
+            class="w-28 shrink-0 text-right tabular-nums"
+            :class="metaClass(index)"
             :title="entry.isParent ? undefined : formatExactDate(entry.mtimeMs)"
           >
             {{ entry.isParent ? '' : formatRelativeDate(entry.mtimeMs) }}
