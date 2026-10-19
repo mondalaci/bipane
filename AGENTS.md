@@ -230,6 +230,16 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   mutes the panes at the shell's directory from a submitted command until it
   finishes and settles. A download in another directory, or one that starts
   after the tail, still sweeps; so does `Ctrl+R`.
+- **A mark is a yellow band across the row, and it owns the row's background.**
+  A marked row takes `bg-selected` with `text-bg` on it (`rowClass`), so the size,
+  the date and the symlink target — dim grey on every other row — drop their own
+  colors there (`metaClass`) to be read against yellow. The band beats the
+  cursor's blue, because the mark is the stronger claim: it is what F5/F6/F8 act
+  on. A cursor left standing on a marked row would then have no band of its own to
+  show, so it takes `cursor-on-marked` (`main.css`) — the same 1px accent outline
+  the app already uses for `:focus-visible`, drawn just inside the row. That is
+  what keeps "the row I am on" and "the row I marked" tellable apart when the two
+  coincide; without it the cursor would vanish into the yellow.
 - **A file the user can run is named in green.** The rule is `isRunnable` in
   `lib/executable.ts`, and it needs both halves: an exec bit on a regular file,
   *and* a name the icon table has not already recognized as data. So a screenshot
@@ -240,8 +250,8 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   nothing. The color is `text-runnable` (`main.css`, `--color-runnable`), and it
   goes on the row's *name span* by way of `nameClass`, not on the row: the icon
   keeps the color its own type gives it, the size and date beside the name stay
-  dim, and a marked row keeps its own yellow — the user named that row, so it has
-  to go on reading as marked.
+  dim, and a marked row gives the green up — its yellow band is the row's whole
+  answer, and green on yellow has nothing to say.
 - **A pane footer previews the image under its cursor.** The footer grows to
   fit a thumbnail read through `fs:read-image`, which is the only way to show a
   file the renderer has no URL for: the extension->MIME map lives in

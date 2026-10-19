@@ -2171,32 +2171,45 @@ function endPointerDrag(): void {
 }
 
 function rowClass(index: number): string {
-  const base =
-    index !== props.controller.state.cursor
-      ? 'text-fg'
-      : props.active
-        ? 'bg-selection text-fg-bright'
-        : 'bg-selection-inactive text-fg'
+  const entry = props.controller.state.entries[index]
+  const cursor = index === props.controller.state.cursor
+
+  // A marked row is a band in the mark's own yellow, with its text dark against
+  // it. The band wins over the cursor's blue: the mark is the stronger claim,
+  // since it is what F5/F6/F8 act on. The cursor on a marked row would then have
+  // no band left to show, so it keeps an outline inside the yellow.
+  let base: string
+  if (entry && props.controller.isSelected(entry)) {
+    base = 'bg-selected text-bg'
+    if (cursor) base += ' cursor-on-marked'
+  } else if (cursor) {
+    base = props.active ? 'bg-selection text-fg-bright' : 'bg-selection-inactive text-fg'
+  } else {
+    base = 'text-fg'
+  }
 
   // `fresh` holds the paths a refresh just found new or changed; membership is
   // all the row needs to run its highlight (see styles/flash.css).
-  const entry = props.controller.state.entries[index]
   return entry && props.controller.state.fresh.has(entry.path) ? `${base} flash-row` : base
 }
 
 function metaClass(index: number): string {
+  // A marked row's own dark text carries its size and date: the dim grey the
+  // other rows use has nothing to say against a yellow band.
+  const entry = props.controller.state.entries[index]
+  if (entry && props.controller.isSelected(entry)) return ''
   return index === props.controller.state.cursor ? 'text-fg' : 'text-fg-dim'
 }
 
 /**
- * The name's own color. A mark wins over everything — the user named that row,
- * so it has to go on reading as marked — and otherwise a file the user can run
- * takes the green of `--color-runnable` (lib/executable.ts).
+ * The name's own color: the green of a file the user can run (`--color-runnable`,
+ * lib/executable.ts). A marked row takes none — its yellow band says the row is
+ * marked, and the green would be lost against it.
  */
 function nameClass(index: number): string {
   const entry = props.controller.state.entries[index]
   if (!entry) return ''
-  if (props.controller.isSelected(entry)) return 'text-selected'
+  if (props.controller.isSelected(entry)) return ''
   return isRunnable(entry) ? 'text-runnable' : ''
 }
 
@@ -2367,7 +2380,8 @@ function onRenameBlur(): void {
 
           <span
             v-if="entry.isSymlink && entry.symlinkTarget"
-            class="max-w-40 shrink-0 truncate font-mono text-ui-sm text-fg-dim"
+            class="max-w-40 shrink-0 truncate font-mono text-ui-sm"
+            :class="controller.isSelected(entry) ? '' : 'text-fg-dim'"
             :title="entry.symlinkTarget"
           >
             → {{ entry.symlinkTarget }}
