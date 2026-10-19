@@ -536,6 +536,36 @@ function toggleSearch(): void {
 }
 
 /**
+ * Quote one word for the shell the command line runs on. The value is pasted
+ * as a literal argument, so anything with a space or a character the shell
+ * would act on is wrapped in single quotes (with a quote inside it escaped the
+ * usual way); plain filenames are left alone so an ordinary path reads as it
+ * was typed.
+ */
+function shellQuote(text: string): string {
+  if (text.length > 0 && /^[A-Za-z0-9_@%+=:,./-]+$/.test(text)) return text
+  return `'${text.replace(/'/g, `'\\''`)}'`
+}
+
+/**
+ * Alt+Enter puts the entry under the cursor on the command line, Alt+A its
+ * full path. Both are typed into the shell's own line (the collapsed strip),
+ * exactly as if the user had typed them, so the shell's echo, history and
+ * editing keys all see a real line rather than a value set behind its back.
+ */
+function pasteEntryName(): void {
+  const entry = activePane.value.current()
+  if (!entry || entry.isParent) return
+  shell.value.sendInput(shellQuote(entry.name))
+}
+
+function pasteEntryPath(): void {
+  const entry = activePane.value.current()
+  if (!entry || entry.isParent) return
+  shell.value.sendInput(shellQuote(entry.path))
+}
+
+/**
  * Workspace tabs. Ctrl+T opens a new terminal — a fresh pair of panes at home
  * plus a new shell — at the right of the strip and focuses it; Ctrl+W closes
  * the active one; Ctrl+PageDown / Ctrl+PageUp step to the next and previous
@@ -980,6 +1010,35 @@ function onKeydown(event: KeyboardEvent): void {
     event.preventDefault()
     event.stopPropagation()
     toggleSearch()
+    return
+  }
+
+  // Alt+Enter and Alt+A paste the cursor's entry onto the command line: its
+  // name and its full path. Claimed globally, like Alt+S, so they work wherever
+  // the keyboard is — the collapsed strip is the shell's own line either way.
+  const isPasteName =
+    event.altKey &&
+    !event.ctrlKey &&
+    !event.metaKey &&
+    !event.shiftKey &&
+    event.key === 'Enter'
+
+  if (isPasteName) {
+    consume(event)
+    pasteEntryName()
+    return
+  }
+
+  const isPastePath =
+    event.altKey &&
+    !event.ctrlKey &&
+    !event.metaKey &&
+    !event.shiftKey &&
+    event.code === 'KeyA'
+
+  if (isPastePath) {
+    consume(event)
+    pasteEntryPath()
     return
   }
 

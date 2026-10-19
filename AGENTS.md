@@ -119,7 +119,11 @@ reordered in the row rather than rebuilt, so the exchange is shown as copies of
 both of them travelling to the other column, and nothing in a pane stops for it:
 a display among them goes on playing as it changes column, and the columns keep
 the sizes they had, so the divider does not move,
-`Alt+S` starts an incremental search, `F5` copies the marked entries (or the
+`Alt+S` starts an incremental search, `Alt+Enter` pastes the cursor entry's
+name onto the command line and `Alt+A` its full path (both shell-quoted when
+they contain anything the shell would act on, so a space or a `$` arrives as
+part of the one argument, and both typed into the shell's own line so its echo
+and history see a real command line), `F5` copies the marked entries (or the
 cursor row) into the other pane, `F6` moves them there (both take a destination
 field naming a directory to act into, but for a single entry a path that is not
 a directory is the entry's new name — so `blah` -> `blah2` renames or copies to
