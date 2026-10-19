@@ -186,16 +186,20 @@ onBeforeUnmount(() => {
 })
 
 /**
- * Whether the viewer may close. An edit with unsaved changes asks first, so
- * Escape (or the close button) never discards work silently. Called by App.vue,
- * which owns the open/closed state.
+ * Whether the buffer has unsaved edits. App.vue owns the open/closed state and
+ * stages the in-app discard dialog when this is true, so a close never discards
+ * work silently — the viewer only reports the state, it does not ask.
  */
-function confirmClose(): boolean {
-  if (!dirty.value) return true
-  return window.confirm(`Discard unsaved changes to "${name.value}"?`)
+function isDirty(): boolean {
+  return dirty.value
 }
 
-defineExpose({ confirmClose })
+/** Hand the keyboard back to the editor after a cancelled discard. */
+function focusEditor(): void {
+  editor?.focus()
+}
+
+defineExpose({ isDirty, focusEditor })
 </script>
 
 <template>

@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch 
 import FilePanel from '@renderer/components/FilePanel.vue'
 import ConfirmTransfer from '@renderer/components/ConfirmTransfer.vue'
 import ConfirmDelete from '@renderer/components/ConfirmDelete.vue'
+import ConfirmDiscard from '@renderer/components/ConfirmDiscard.vue'
 import TerminalPane from '@renderer/components/TerminalPane.vue'
 import WorkspaceTabs from '@renderer/components/WorkspaceTabs.vue'
 import TitleBar from '@renderer/components/TitleBar.vue'
@@ -101,6 +102,15 @@ const viewerPath = ref<string | null>(null)
 const viewerMode = ref<'view' | 'edit'>('view')
 const viewerContent = ref<FileContent | null>(null)
 const viewerRef = ref<InstanceType<typeof FileViewer> | null>(null)
+
+/**
+ * Whether the viewer is being closed with unsaved edits. Closing a dirty buffer
+ * stages this dialog instead of discarding outright, so the app confirms with
+ * its own popup the way the copy and delete dialogs do rather than handing the
+ * question to an OS window. The name shown is the viewer's own file.
+ */
+const discardOpen = ref(false)
+const viewerName = computed(() => (viewerPath.value === null ? '' : baseName(viewerPath.value)))
 
 /**
  * F8 never deletes on its own: it stages the pane's targets here and the
@@ -753,21 +763,38 @@ async function openViewer(
   }
 
   pane.state.error = null
+  discardOpen.value = false
   viewerContent.value = result.data
   viewerMode.value = mode
   viewerPath.value = target
 }
 
 /**
- * Closing is deferred to the viewer so an edit with unsaved changes can ask
- * first; the viewer is the only thing that knows whether the buffer is dirty.
+ * Closing a viewer with unsaved edits stages the app's own discard dialog; the
+ * viewer is the only thing that knows whether the buffer is dirty, so it is
+ * asked rather than the close being decided here.
  */
 function closeViewer(): void {
-  if (viewerRef.value && !viewerRef.value.confirmClose()) return
+  if (viewerRef.value?.isDirty()) {
+    discardOpen.value = true
+    return
+  }
+  dismissViewer()
+}
+
+/** Close the viewer outright — the confirmed discard, or a clean buffer. */
+function dismissViewer(): void {
+  discardOpen.value = false
   viewerRequest += 1
   viewerPath.value = null
   viewerContent.value = null
   focusPanes()
+}
+
+/** Cancel the discard: the buffer is untouched, so the editor takes focus back. */
+function cancelDiscard(): void {
+  discardOpen.value = false
+  viewerRef.value?.focusEditor()
 }
 
 function requestDelete(): void {
@@ -1097,6 +1124,18 @@ function handlePaneKey(event: KeyboardEvent): void {
 }
 
 function onKeydown(event: KeyboardEvent): void {
+  // The discard dialog sits over the viewer, so it is answered before the
+  // viewer's own keys: Escape cancels it and hands the editor back its focus,
+  // and every other key belongs to the dialog (its default button is focused,
+  // arrows move between the buttons, Enter activates the focused one).
+  if (discardOpen.value) {
+    if (event.key === 'Escape') {
+      consume(event)
+      cancelDiscard()
+    }
+    return
+  }
+
   // The viewer owns the keyboard while it is open — Monaco handles Ctrl+F and
   // the rest itself — so nothing here consumes keys except Escape, which closes
   // it. This also covers the error state, where no editor was created to close.
@@ -1441,6 +1480,13 @@ onBeforeUnmount(() => {
       :entries="deleteTargets"
       @confirm="confirmDelete"
       @cancel="cancelDelete"
+    />
+
+    <ConfirmDiscard
+      v-if="discardOpen"
+      :name="viewerName"
+      @confirm="dismissViewer"
+      @cancel="cancelDiscard"
     />
   </div>
 </template>

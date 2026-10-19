@@ -689,9 +689,14 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   and `TerminalPane`, so the title and status bars stay visible. While a file is
   open the window capture handler consumes only `Escape` and returns for
   everything else, so Monaco — not the panes or the shell — owns the keyboard.
-  Escape closing is *delegated* to the viewer (`confirmClose()` via a template
-  ref), because only it knows whether an edit (F4) is dirty; a dirty buffer
-  prompts before anything is discarded. `Escape` is claimed at the window level
+  Escape closing is *delegated* to the viewer only for the question of whether
+  there is anything to lose — it exposes `isDirty()` via a template ref, since
+  only it knows whether an edit (F4) has unsaved changes — while the app owns the
+  answer: a dirty buffer stages the same kind of in-app `ConfirmDiscard` dialog
+  as the copy and delete confirmations (`discardOpen` in `App.vue`) rather than an
+  OS `window.confirm`, so every prompt in the app looks and behaves alike. Its
+  Cancel hands focus back to the editor via the viewer's `focusEditor()`, and its
+  Discard is what actually closes. `Escape` is claimed at the window level
   rather than as a Monaco command so that even a viewer with no editor — one
   whose Monaco would not load — still closes. Ctrl+S is a Monaco command, which
   the capture handler deliberately lets through untouched. A *save* failure sets
