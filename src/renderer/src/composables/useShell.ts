@@ -18,6 +18,14 @@ export interface Shell {
   readonly cwd: Ref<string | null>
   readonly idle: Ref<boolean>
   /**
+   * The exit code once the shell process has ended, or null while it runs. The
+   * app watches this to take the terminal's tab away: `exit` (or Ctrl+D) is the
+   * user closing a terminal, and a session with no prompt is of no use to the
+   * command line. It is app state rather than a view's callback, so a shell that
+   * dies in a background tab is answered just the same as the active one.
+   */
+  readonly exitCode: Ref<number | null>
+  /**
    * What the shell's input line currently holds. We model it from the bytes
    * xterm sends, because the command line *is* the shell: the alternative is
    * poking at the terminal buffer, which cannot tell where the prompt ends.
@@ -39,10 +47,7 @@ export interface Shell {
   noteInput(data: string): void
   refreshState(): Promise<void>
   resize(cols: number, rows: number): void
-  attachTerminal(
-    onData: (data: string) => void,
-    onExit: (code: number) => void
-  ): { initial: string; detach: () => void }
+  attachTerminal(onData: (data: string) => void): { initial: string; detach: () => void }
   /** Stop polling and kill the underlying process (Ctrl+W on the workspace). */
   dispose(): void
 }
@@ -53,11 +58,11 @@ export function createShell(id: string): Shell {
   const idle = ref(false)
   const inputLine = ref('')
   const commandSeq = ref(0)
+  const exitCode = ref<number | null>(null)
 
   let lineBuffer = ''
 
   const dataListeners = new Set<(data: string) => void>()
-  const exitListeners = new Set<(code: number) => void>()
 
   let buffer = ''
   let pollTimer: number | null = null
@@ -104,6 +109,10 @@ export function createShell(id: string): Shell {
   function ensureStarted(spawnCwd: string, cols: number, rows: number): Promise<void> {
     if (startPromise) return startPromise
 
+    // A fresh spawn is a fresh session: any code a previous process left behind
+    // must not read as this one having already ended.
+    exitCode.value = null
+
     const created = window.bipane.pty.create(id, {
       cwd: spawnCwd,
       cols: Math.max(cols, 2),
@@ -119,7 +128,7 @@ export function createShell(id: string): Shell {
     const onExitDisposer = window.bipane.pty.onExit((event) => {
       if (event.id !== id) return
       if (cancelled) return
-      for (const listener of exitListeners) listener(event.exitCode)
+      exitCode.value = event.exitCode
       stopListening()
       teardown()
     })
@@ -191,21 +200,18 @@ export function createShell(id: string): Shell {
   }
 
   function attachTerminal(
-    onData: (data: string) => void,
-    onExit: (code: number) => void
+    onData: (data: string) => void
   ): { initial: string; detach: () => void } {
     // The buffer is not drained: a terminal that attaches later — or re-attaches
     // after a reload — replays the session so far instead of showing a blank
     // screen. It is a bounded rolling window, not the full scrollback.
     const initial = buffer
     dataListeners.add(onData)
-    exitListeners.add(onExit)
 
     return {
       initial,
       detach: () => {
         dataListeners.delete(onData)
-        exitListeners.delete(onExit)
       }
     }
   }
@@ -213,7 +219,6 @@ export function createShell(id: string): Shell {
   function dispose(): void {
     stopPolling()
     dataListeners.clear()
-    exitListeners.clear()
     startPromise = null
     started.value = false
     idle.value = false
@@ -229,6 +234,7 @@ export function createShell(id: string): Shell {
     idle,
     inputLine,
     commandSeq,
+    exitCode,
     ensureStarted,
     write,
     sendInput,

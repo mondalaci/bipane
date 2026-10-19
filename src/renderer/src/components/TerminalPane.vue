@@ -195,10 +195,10 @@ function startTerminal(): void {
     return !isTerminalToggle
   })
 
-  const attached = props.shell.attachTerminal(
-    (data) => term?.write(data),
-    (code) => term?.write(`\r\n\x1b[90m[process exited with code ${code}]\x1b[0m\r\n`)
-  )
+  // No exit line is written to the view: a shell that ends takes its tab with
+  // it (the app watches `shell.exitCode`), so there is no dead terminal left to
+  // explain.
+  const attached = props.shell.attachTerminal((data) => term?.write(data))
   detach = attached.detach
   if (attached.initial) term.write(attached.initial)
 

@@ -29,13 +29,39 @@ import type { FileContent, FsError, PanelSide } from '@shared/types'
  */
 let workspaceSeq = 0
 
+/**
+ * The exit-watch stops, one per workspace. The watch cannot live in the
+ * workspace's own effect scope: answering a dead shell is the app's job — it is
+ * the app that owns the tab strip the tab has to leave — so it is created here
+ * and stopped here.
+ */
+const exitStops = new Map<Workspace, () => void>()
+
 function makeWorkspace(): Workspace {
   workspaceSeq += 1
-  return createWorkspace(`ws-${workspaceSeq}`, `Terminal ${workspaceSeq}`)
+  const workspace = createWorkspace(`ws-${workspaceSeq}`, `Terminal ${workspaceSeq}`)
+
+  // Watched per workspace, not just the active one: a shell that ends while its
+  // tab is in the background must not be found dead only once it is revisited.
+  exitStops.set(
+    workspace,
+    watch(workspace.shell.exitCode, (code) => {
+      if (code !== null) closeExitedWorkspace(workspace)
+    })
+  )
+
+  return workspace
 }
 
 const workspaces = shallowRef<Workspace[]>([makeWorkspace()])
 const activeIndex = ref(0)
+
+/** Retire a workspace: stop watching its shell, then tear it down. */
+function releaseWorkspace(workspace: Workspace): void {
+  exitStops.get(workspace)?.()
+  exitStops.delete(workspace)
+  workspace.dispose()
+}
 
 const activeWorkspace = computed(() => workspaces.value[activeIndex.value] ?? workspaces.value[0]!)
 
@@ -610,7 +636,37 @@ function closeWorkspace(index: number): void {
   if (index < activeIndex.value) activeIndex.value -= 1
   else if (index === activeIndex.value) activeIndex.value = Math.min(index, next.length - 1)
 
-  workspace.dispose()
+  releaseWorkspace(workspace)
+  void nextTick(() => focusPanes())
+}
+
+/**
+ * A shell the user ended — `exit`, or Ctrl+D — takes its own tab with it: the
+ * tab *is* that terminal, and a prompt-less session leaves the command line
+ * useless. Unlike Ctrl+W the last tab is not spared: it is replaced by a fresh
+ * workspace, so the app is never left with nothing but a dead terminal to come
+ * back to.
+ */
+function closeExitedWorkspace(workspace: Workspace): void {
+  const index = workspaces.value.indexOf(workspace)
+  if (index === -1) return
+
+  exitStage()
+  const remaining = workspaces.value.filter((_, i) => i !== index)
+
+  if (remaining.length === 0) {
+    const fresh = makeWorkspace()
+    workspaces.value = [fresh]
+    activeIndex.value = 0
+    void fresh.init()
+  } else {
+    workspaces.value = remaining
+    if (index < activeIndex.value) activeIndex.value -= 1
+    else if (index === activeIndex.value)
+      activeIndex.value = Math.min(index, remaining.length - 1)
+  }
+
+  releaseWorkspace(workspace)
   void nextTick(() => focusPanes())
 }
 
@@ -1220,7 +1276,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown, { capture: true })
   window.removeEventListener('focus', restoreFocus)
   document.removeEventListener('focusout', onFocusDrop)
-  for (const workspace of workspaces.value) workspace.dispose()
+  for (const workspace of workspaces.value) releaseWorkspace(workspace)
 })
 </script>
 
