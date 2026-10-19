@@ -143,7 +143,14 @@ function startTerminal(): void {
     cursorStyle: 'block',
     fontFamily: monoFontStack(),
     fontSize: 12,
-    lineHeight: 1.25,
+    // The cell height has to be the font's own line box (12px * 1.32 = ~16px),
+    // not a roomier multiple of the font size. A TUI's frames are drawn from the
+    // box-drawing glyphs themselves (the DOM renderer draws every character with
+    // the font), and JetBrains Mono's `│` only reaches ~1.52em — so at a taller
+    // cell the ink stops short of the cell's bottom edge and every row leaves a
+    // ~3px gap: the "pipes" that do not join, next to an emulator whose cell is
+    // the font's own height. At 16px the glyphs meet and a frame is continuous.
+    lineHeight: 1.0,
     scrollback: 5000,
     allowProposedApi: true,
     theme: {
@@ -228,6 +235,12 @@ onMounted(() => {
     refit()
     focusTerminal()
   })
+
+  // The mono font is a bundled web font now, so the first fit measures the row
+  // against whatever fallback is up until it arrives — and fit is what tells the
+  // pty its cols/rows. Re-fit once the font has actually loaded, so the grid is
+  // the font's own and the shell is sized to a cell that exists.
+  void document.fonts.ready.then(() => refit())
 })
 
 onBeforeUnmount(() => {

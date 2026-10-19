@@ -829,6 +829,38 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   Theme tokens are the design system — prefer `bg-surface`, `text-fg-dim`,
   `border-border` over raw hex values. The terminal resolves its font from the
   `--font-mono` token at runtime, so the mono font is defined in one place.
+- **The mono font is bundled, not hoped for.** `--font-mono` starts with
+  `'JetBrainsMono Nerd Font Mono'`, an `@font-face` in `main.css` over the two
+  TTFs in `src/renderer/src/assets/fonts/` (Nerd Fonts v3.5.1, the *Mono* cut so
+  icon glyphs are one cell wide and the terminal grid stays square; `out/renderer`
+  emits them, and the relative `url()` survives the `file://` build, covered by
+  `font-src 'self'` in the CSP). It is there because box-drawing/block/braille
+  and the private-use-area glyphs a TUI labels itself with — Nerd Font icons,
+  Powerline separators — are in no stock mono face, so without it every one fell
+  to a per-glyph fallback or tofu. Only Regular and Bold ship; italic is
+  synthesised. Because the font is now a web font, the first `fit()` measures a
+  fallback, so `TerminalPane` re-fits on `document.fonts.ready` — otherwise the
+  cols/rows reported to the pty would keep the fallback's cell size.
+- **The terminal's cell is the font's own line box, which is what keeps a TUI's
+  frames joined.** xterm 6 uses the *DOM* renderer by default, which draws every
+  character — box-drawing included — with the font; its `customGlyphs` option,
+  the one that would have xterm draw those glyphs itself, is documented as not
+  working with that renderer and does nothing here. So continuity is a question
+  of cell height against glyph ink: JetBrains Mono's `│` spans ~1.52em (bounds
+  -400..1120 on a 1000 upem), while `lineHeight: 1.25` made a 20px cell for the
+  12px font and left ~3px of it empty below the ink — every row a short dash, a
+  frame of "pipes" that never join, next to an emulator whose cell is the font's
+  natural height. `lineHeight: 1.0` gives the same 16px cell GNOME Terminal uses
+  (the font's `hhea` line box: 1020 + 300 on 1000 upem, ~1.32em = 15.84px,
+  rounded to 16), and there the ink overflows the cell and consecutive rows meet.
+  The bundled font's glyph coverage is what makes this work at all: a font
+  without a range would fall back per glyph and break the grid.
+
+  Measuring it is a one-liner over CDP, and it is worth doing before reaching for
+  `customGlyphs`: `document.querySelector('.xterm-rows').firstElementChild` and
+  `getComputedStyle(...).height` gives the real cell height, and forcing
+  `document.head` `<style>.xterm-rows > div { height: 16px !important }</style>`
+  shows the joined frame without a rebuild.
 - The renderer has a CSP in `src/renderer/index.html`. Dev-only allowances
   (`ws://localhost:*`, `'unsafe-inline'` styles) are required for Vite HMR, and
   `img-src data:` / `media-src bipane-media:` are what let a footer show a

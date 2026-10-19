@@ -6,6 +6,31 @@
 @import './swap.css';
 @import './viewer.css';
 
+/* The mono font is bundled rather than hoped for: the terminal and the code
+   viewer draw box-drawing and block characters, and, above all, the
+   private-use-area glyphs a TUI labels itself with (Nerd Font icons, Powerline
+   separators). No such glyph is in a stock mono face, so relying on the system
+   font left every icon to a per-glyph fallback — or tofu. This is JetBrains Mono
+   patched with the Nerd Fonts icon set, in its *Mono* cut: it forces the icon
+   glyphs to a single cell each, which is what keeps the terminal's grid square.
+   Only Regular and Bold are shipped; the browser synthesises an oblique for
+   italic. */
+@font-face {
+  font-family: 'JetBrainsMono Nerd Font Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../assets/fonts/JetBrainsMonoNerdFontMono-Regular.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'JetBrainsMono Nerd Font Mono';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('../assets/fonts/JetBrainsMonoNerdFontMono-Bold.ttf') format('truetype');
+}
+
 @theme {
   --color-bg: #1e1e1e;
   --color-bg-alt: #181818;
@@ -33,7 +58,7 @@
   --color-danger: #f14c4c;
 
   --font-sans: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
-  --font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, Consolas, monospace;
+  --font-mono: 'JetBrainsMono Nerd Font Mono', 'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, Consolas, monospace;
 
   --text-2xs: 10px;
   --text-ui-sm: 11px;
