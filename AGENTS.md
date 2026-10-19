@@ -107,7 +107,8 @@ gesture; pressed again it gives the window back, and `Escape` leaves the mode),
 read-only in the Monaco viewer, `F4` opens it for editing with Ctrl+S to save (a
 directory still descends on `F3`), `Insert` marks the current entry and moves down,
 right-click marks a row and dragging the held button paints that mark across
-rows, `Ctrl+O` toggles the terminal, `Ctrl+R` re-lists the active pane,
+rows (holding the left button and dragging instead moves the cursor from row to
+row), `Ctrl+O` toggles the terminal, `Ctrl+R` re-lists the active pane,
 `Ctrl+T` opens a new terminal — a fresh workspace (two panes at home plus a new
 shell) at the right of the tab strip, focused — `Ctrl+W` closes the active one
 (the last workspace is never closed), `Ctrl+PageDown`/`Ctrl+PageUp` step to the

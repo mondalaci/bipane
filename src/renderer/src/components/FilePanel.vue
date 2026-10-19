@@ -2064,7 +2064,7 @@ onMounted(() => {
   listObserver = new ResizeObserver(onListResize)
   if (listEl.value) listObserver.observe(listEl.value)
   measurePageRows()
-  window.addEventListener('mouseup', endPainting)
+  window.addEventListener('mouseup', endPointerDrag)
 })
 
 onBeforeUnmount(() => {
@@ -2077,7 +2077,7 @@ onBeforeUnmount(() => {
   releaseStageSeek()
   cancelPreviewRead()
   cancelAnimationFrame(scrollAnimation)
-  window.removeEventListener('mouseup', endPainting)
+  window.removeEventListener('mouseup', endPointerDrag)
 })
 
 function onSearchInput(event: Event): void {
@@ -2131,6 +2131,19 @@ function onNameClick(index: number, event: MouseEvent): void {
  */
 let painting: { select: boolean } | null = null
 
+/**
+ * The left button held down over the listing: the cursor follows the pointer
+ * from row to row, so pressing and dragging picks a row the way moving the
+ * pointer over it would. A plain click still ends here too, but the cursor
+ * move it makes on the way down is the same one it would make on the way up.
+ */
+let draggingCursor = false
+
+function onRowLeftDown(index: number): void {
+  draggingCursor = true
+  props.controller.moveTo(index)
+}
+
 function onRowRightDown(index: number, event: MouseEvent): void {
   const entry = props.controller.state.entries[index]
   if (!entry || entry.isParent) return
@@ -2142,14 +2155,17 @@ function onRowRightDown(index: number, event: MouseEvent): void {
 }
 
 function onRowEnter(index: number): void {
+  if (draggingCursor) props.controller.moveTo(index)
+
   if (!painting) return
   const entry = props.controller.state.entries[index]
   if (!entry || entry.isParent) return
   props.controller.setSelected(entry.path, painting.select)
 }
 
-function endPainting(): void {
+function endPointerDrag(): void {
   painting = null
+  draggingCursor = false
 }
 
 function rowClass(index: number): string {
@@ -2302,6 +2318,7 @@ function onRenameBlur(): void {
           class="flex cursor-default items-center gap-2 px-3 text-ui"
           :style="{ height: `${ROW_HEIGHT}px` }"
           :class="rowClass(index)"
+          @mousedown.left="onRowLeftDown(index)"
           @mousedown.right="onRowRightDown(index, $event)"
           @mouseenter="onRowEnter(index)"
           @contextmenu.prevent
