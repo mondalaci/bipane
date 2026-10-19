@@ -65,6 +65,17 @@ let stripTransform = ''
  * of the previous line. The gutter above and below is the host's margin instead,
  * which lies outside the clip edge, and the height written here is exactly one
  * row.
+ *
+ * Expanded, the same shift pins the screen to the *bottom* of its host while the
+ * section opens. The host is only a whole number of rows tall once the animation
+ * has settled; for its length the height is an interpolated fraction while the
+ * fit rounds the row count down, so a terminal laid out from the top is left
+ * between zero and one row of empty space under the cursor line — a gap that
+ * grows smoothly and snaps back with every row the fit adds, which is the
+ * command line jittering as the terminal grows. Holding the screen's bottom
+ * against the host's bottom keeps the cursor line still and lets the rows above
+ * it appear as the box opens. The strip left above the screen is the page
+ * background, which is the terminal's own background colour, so it is not seen.
  */
 function applyStripViewport(): void {
   const hostEl = host.value
@@ -73,7 +84,11 @@ function applyStripViewport(): void {
 
   if (props.expanded) {
     if (stripHeight !== '') hostEl.style.height = stripHeight = ''
-    if (stripTransform !== '') xtermEl.style.transform = stripTransform = ''
+    const screenHeight = xtermEl.getBoundingClientRect().height
+    if (screenHeight <= 0) return
+    const shift = hostEl.getBoundingClientRect().height - screenHeight
+    const nextTransform = Math.abs(shift) > 0.5 ? `translateY(${shift}px)` : ''
+    if (nextTransform !== stripTransform) xtermEl.style.transform = stripTransform = nextTransform
     return
   }
 
