@@ -14,6 +14,13 @@ function monoFontStack(): string {
   return value || 'monospace'
 }
 
+// A theme token as a concrete colour, for the places xterm needs one before the
+// app's own CSS can answer for it.
+function themeColor(name: string, fallback: string): string {
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+  return value || fallback
+}
+
 // `shell` is the workspace's session. The view does not own it — it detaches on
 // unmount and lets the workspace decide when the process dies — so switching
 // workspaces simply renders a different session.
@@ -154,27 +161,40 @@ function startTerminal(): void {
     scrollback: 5000,
     allowProposedApi: true,
     theme: {
-      background: '#1e1e1e',
+      // The terminal is a program's surface, not the app's own chrome, so it
+      // gets a background of its own. A TUI is entitled to lay its panels out
+      // against the host terminal's default background and paint only its
+      // chrome — herdr leaves its sidebar and panes at `SGR 49` and colours the
+      // rest — and that only reads if the background differs from the chrome it
+      // draws on top. Sharing `--color-bg` (#1e1e1e) put the two within a few
+      // units of each other, so the whole UI collapsed into one flat shade.
+      background: themeColor('--color-surface-2', '#2d2d30'),
       foreground: '#cccccc',
       cursor: '#cccccc',
-      cursorAccent: '#1e1e1e',
+      cursorAccent: themeColor('--color-surface-2', '#2d2d30'),
       selectionBackground: '#264f78',
+      // The sixteen ANSI slots take xterm's own defaults. ANSI standardises the
+      // slot *names*, not their RGB values, so every concrete palette is
+      // opinionated; xterm's is the reference a `TERM=xterm-256color` terminal
+      // implies and the one Unix CLI tools' colour choices are written against,
+      // which makes it the least surprising palette to inherit. (VS Code's,
+      // which this used to mirror, is a different opinionated set.)
       black: '#000000',
-      red: '#cd3131',
-      green: '#0dbc79',
-      yellow: '#e5e510',
-      blue: '#2472c8',
-      magenta: '#bc3fbc',
-      cyan: '#11a8cd',
+      red: '#cd0000',
+      green: '#00cd00',
+      yellow: '#cdcd00',
+      blue: '#0000ee',
+      magenta: '#cd00cd',
+      cyan: '#00cdcd',
       white: '#e5e5e5',
-      brightBlack: '#666666',
-      brightRed: '#f14c4c',
-      brightGreen: '#23d18b',
-      brightYellow: '#f5f543',
-      brightBlue: '#3b8eea',
-      brightMagenta: '#d670d6',
-      brightCyan: '#29b8db',
-      brightWhite: '#e5e5e5'
+      brightBlack: '#7f7f7f',
+      brightRed: '#ff0000',
+      brightGreen: '#00ff00',
+      brightYellow: '#ffff00',
+      brightBlue: '#5c5cff',
+      brightMagenta: '#ff00ff',
+      brightCyan: '#00ffff',
+      brightWhite: '#ffffff'
     }
   })
 
@@ -269,7 +289,7 @@ defineExpose({ focusTerminal })
 <template>
   <section
     ref="root"
-    class="flex min-h-0 flex-col overflow-hidden border-t border-border bg-bg transition-[flex-grow,flex-basis] duration-150 ease-out"
+    class="flex min-h-0 flex-col overflow-hidden border-t border-border bg-surface-2 transition-[flex-grow,flex-basis] duration-150 ease-out"
     :class="expanded ? 'grow basis-0' : 'grow-0 shrink-0 basis-7'"
     @focusin="emit('focused-change', true)"
     @focusout="onFocusOut"

@@ -861,6 +861,24 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   `getComputedStyle(...).height` gives the real cell height, and forcing
   `document.head` `<style>.xterm-rows > div { height: 16px !important }</style>`
   shows the joined frame without a rebuild.
+- **The terminal is a surface of its own, not the app's chrome.** Its xterm
+  `background` and `cursorAccent` are `--color-surface-2` (#2d2d30), and the
+  `section` around it carries the same token (so the host's padding does not
+  frame it in another colour). A TUI is entitled to lay its layout out against
+  the host terminal's *default* background — `SGR 49`, which is what herdr
+  leaves its sidebar and panes at while it paints only its chrome — and that only
+  reads as panels if the background differs from the chrome drawn on top. Sharing
+  the app's near-black `--color-bg` (#1e1e1e) put the two within a few units of
+  each other (herdr's base is #1e1e2e) and flattened the whole UI, while a
+  standard terminal background (GNOME's #2e3436) showed it correctly. It is not
+  a colour-depth or capability problem: herdr emits only truecolour (`38;2` /
+  `48;2`) and its colours arrive intact; the background was the only delta.
+  The sixteen ANSI slots are **xterm's defaults** (`#cd0000`, `#00cd00`,
+  `#0000ee`, `#5c5cff`, …), not VS Code's: ANSI standardises the slot names and
+  not their RGB values, so any palette is opinionated, and `TERM=xterm-256color`
+  makes xterm's the reference a CLI tool's colour choices are written against.
+  That is the least surprising set to inherit; the foreground (#cccccc) and the
+  surface stay the app's own.
 - The renderer has a CSP in `src/renderer/index.html`. Dev-only allowances
   (`ws://localhost:*`, `'unsafe-inline'` styles) are required for Vite HMR, and
   `img-src data:` / `media-src bipane-media:` are what let a footer show a
