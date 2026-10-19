@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ComponentPublicInstance } from 'vue'
-import type { PaneController, ScrollAlign } from '@renderer/composables/useDirectory'
+import type { PaneController, PaneEntry, ScrollAlign } from '@renderer/composables/useDirectory'
 import { isRunnable } from '@renderer/lib/executable'
 import {
   formatDuration,
@@ -78,6 +78,28 @@ const emit = defineEmits<{
 const listEl = ref<HTMLUListElement | null>(null)
 const footerEl = ref<HTMLElement | null>(null)
 const searchInput = ref<HTMLInputElement | null>(null)
+
+/**
+ * The listing is windowed rather than rendered whole: a directory can hold tens
+ * of thousands of entries, and one DOM row (plus its icon, name, size and date)
+ * each is a cost paid on every navigation, every cursor move and every refresh.
+ * Only the rows the viewport can show — plus an overscan band, so a fast scroll
+ * never flashes a blank strip — are in the document; the rows above and below are
+ * two spacers of their exact height, which keeps the scrollbar honest and the
+ * fixed `ROW_HEIGHT` arithmetic (`scrollRowIntoView`, `measureListSlack`) valid.
+ */
+const OVERSCAN_ROWS = 10
+
+/** Where the listing is scrolled to, kept from its own scroll events. */
+const scrollTop = ref(0)
+
+/**
+ * How tall the listing's viewport is, measured with the rows. Zero before the
+ * first measurement, where a window of `VIEWPORT_FALLBACK_ROWS` stands in so the
+ * first paint is never empty.
+ */
+const viewportHeight = ref(0)
+const VIEWPORT_FALLBACK_ROWS = 60
 
 // The footer mirrors the status of this pane's own cursor and marks.
 const entry = computed(() => props.controller.current())
@@ -1928,6 +1950,55 @@ const notice = computed(() => {
   }
 })
 
+/**
+ * The rows to render: the entries the viewport covers, widened by the overscan
+ * band and carried with their absolute index, so every handler and the per-row
+ * class helpers key off the same index the controller's cursor uses. The
+ * arithmetic is index-against-`ROW_HEIGHT` only — no DOM measurement — which is
+ * what lets the window be computed before the rows it describes exist.
+ */
+const visibleRows = computed<{ entry: PaneEntry; index: number }[]>(() => {
+  const entries = props.controller.state.entries
+  const total = entries.length
+  if (total === 0) return []
+
+  const height = viewportHeight.value || ROW_HEIGHT * VIEWPORT_FALLBACK_ROWS
+  // Clamped so a stale `scrollTop` (a shorter directory than the one scrolled in)
+  // still renders its last row rather than an empty band.
+  const first = Math.min(
+    Math.max(Math.floor(scrollTop.value / ROW_HEIGHT) - OVERSCAN_ROWS, 0),
+    total - 1
+  )
+  const last = Math.min(
+    Math.max(Math.ceil((scrollTop.value + height) / ROW_HEIGHT) + OVERSCAN_ROWS, first + 1),
+    total
+  )
+
+  const rows: { entry: PaneEntry; index: number }[] = []
+  for (let i = first; i < last; i += 1) {
+    const entry = entries[i]
+    if (entry) rows.push({ entry, index: i })
+  }
+  return rows
+})
+
+/** The rows hidden above the window, as a spacer of their exact height. */
+const topPad = computed(() =>
+  visibleRows.value.length > 0 ? visibleRows.value[0]!.index * ROW_HEIGHT : 0
+)
+
+/** The rows hidden below the window, as a spacer of their exact height. */
+const bottomPad = computed(() => {
+  const rows = visibleRows.value
+  if (rows.length === 0) return 0
+  return (props.controller.state.entries.length - rows[rows.length - 1]!.index - 1) * ROW_HEIGHT
+})
+
+function onListScroll(): void {
+  const element = listEl.value
+  if (element) scrollTop.value = element.scrollTop
+}
+
 let listObserver: ResizeObserver | null = null
 /** The footer's height at the last resize, to tell a strip move from the rest. */
 let lastFooterHeight: number | null = null
@@ -1940,6 +2011,9 @@ function measurePageRows(): void {
   const padding = parseFloat(getComputedStyle(element).paddingTop)
   const usable = element.clientHeight - padding
   props.controller.state.pageRows = Math.max(1, Math.floor(usable / ROW_HEIGHT))
+  // The window is sized from the same box the page count is, so a resize (a
+  // footer growing, the terminal taking room) re-windows the listing with it.
+  viewportHeight.value = element.clientHeight
 }
 
 /**
@@ -1954,16 +2028,18 @@ function measurePageRows(): void {
 function measureListSlack(): void {
   const element = listEl.value
   const footer = footerEl.value
-  const last = element?.lastElementChild
-  if (element === null || footer === null || last === null || last === undefined) {
+  const rows = props.controller.state.entries.length
+  if (element === null || footer === null || rows === 0) {
     listSlack.value = 0
     return
   }
 
   const settled = footerTall.value ? FOOTER_PREVIEW_HEIGHT : FOOTER_HEIGHT
   const room = element.clientHeight + Math.max(0, footer.offsetHeight - settled)
-  const contentEnd =
-    element.scrollTop + last.getBoundingClientRect().bottom - element.getBoundingClientRect().top
+  // The bottom of the last row, in the listing's own content coordinates. It is
+  // worked out from the row count rather than measured off the last child: the
+  // listing is windowed, so the last row is usually not in the document at all.
+  const contentEnd = rows * ROW_HEIGHT
   listSlack.value = Math.min(Math.max(element.scrollTop + room - contentEnd, 0), FOOTER_GROWTH)
 }
 
@@ -2388,30 +2464,44 @@ function onRenameBlur(): void {
         </Transition>
       </div>
 
-      <ul ref="listEl" class="min-h-0 flex-1 overflow-y-auto" :style="listSlackStyle">
+      <!-- Only the rows the viewport covers are in the document (see
+           `visibleRows`); the rows hidden above and below stand in as spacers of
+           their exact height, so the scrollbar, the page arithmetic and the
+           scroll-into-view all measure the whole listing as if it were there. -->
+      <ul
+        ref="listEl"
+        class="min-h-0 flex-1 overflow-y-auto"
+        :style="listSlackStyle"
+        @scroll="onListScroll"
+      >
         <li
-          v-for="(entry, index) in controller.state.entries"
-          :key="entry.path"
+          v-if="topPad > 0"
+          aria-hidden="true"
+          :style="{ height: `${topPad}px` }"
+        />
+        <li
+          v-for="row in visibleRows"
+          :key="row.entry.path"
           class="flex cursor-default items-center gap-2 px-3 text-ui"
           :style="{ height: `${ROW_HEIGHT}px` }"
-          :class="rowClass(index)"
-          @mousedown.left="onRowLeftDown(index)"
-          @mousedown.right="onRowRightDown(index, $event)"
-          @mouseenter="onRowEnter(index)"
+          :class="rowClass(row.index)"
+          @mousedown.left="onRowLeftDown(row.index)"
+          @mousedown.right="onRowRightDown(row.index, $event)"
+          @mouseenter="onRowEnter(row.index)"
           @contextmenu.prevent
-          @click="onRowClick(index)"
+          @click="onRowClick(row.index)"
           @dblclick="onRowDblclick"
         >
           <span class="flex w-4 shrink-0 items-center justify-center">
-            <FileIcon :entry="entry" />
+            <FileIcon :entry="row.entry" />
           </span>
 
           <input
-            v-if="controller.state.renaming === entry.path"
+            v-if="controller.state.renaming === row.entry.path"
             :ref="setRenameInput"
             type="text"
             class="min-w-0 flex-1 rounded border border-accent-strong bg-bg px-1 font-mono text-ui text-fg outline-none"
-            :value="entry.name"
+            :value="row.entry.name"
             spellcheck="false"
             autocomplete="off"
             @keydown="onRenameKey"
@@ -2423,32 +2513,37 @@ function onRenameBlur(): void {
           <span v-else class="flex min-w-0 flex-1 items-center gap-2">
             <span
               class="min-w-0 shrink truncate"
-              :class="nameClass(index)"
-              @click="onNameClick(index, $event)"
-              >{{ entry.name }}</span
+              :class="nameClass(row.index)"
+              @click="onNameClick(row.index, $event)"
+              >{{ row.entry.name }}</span
             >
 
             <span
-              v-if="entry.isSymlink && entry.symlinkTarget"
+              v-if="row.entry.isSymlink && row.entry.symlinkTarget"
               class="min-w-0 shrink truncate text-ui-sm"
-              :class="symlinkTargetClass(index)"
-              :title="entry.symlinkTarget"
+              :class="symlinkTargetClass(row.index)"
+              :title="row.entry.symlinkTarget"
             >
-              → {{ entry.symlinkTarget }}
+              → {{ row.entry.symlinkTarget }}
             </span>
           </span>
 
-          <span class="w-16 shrink-0 text-right tabular-nums" :class="metaClass(index)">
-            {{ entry.kind === 'directory' ? '' : formatSize(entry.size) }}
+          <span class="w-16 shrink-0 text-right tabular-nums" :class="metaClass(row.index)">
+            {{ row.entry.kind === 'directory' ? '' : formatSize(row.entry.size) }}
           </span>
           <span
             class="w-28 shrink-0 text-right tabular-nums"
-            :class="metaClass(index)"
-            :title="entry.isParent ? undefined : formatExactDate(entry.mtimeMs)"
+            :class="metaClass(row.index)"
+            :title="row.entry.isParent ? undefined : formatExactDate(row.entry.mtimeMs)"
           >
-            {{ entry.isParent ? '' : formatRelativeDate(entry.mtimeMs) }}
+            {{ row.entry.isParent ? '' : formatRelativeDate(row.entry.mtimeMs) }}
           </span>
         </li>
+        <li
+          v-if="bottomPad > 0"
+          aria-hidden="true"
+          :style="{ height: `${bottomPad}px` }"
+        />
       </ul>
 
       <div
