@@ -2241,6 +2241,21 @@ function metaClass(index: number): string {
 }
 
 /**
+ * The target beside a symlink's name: normally the dim gray that keeps it
+ * secondary to the name, and `text-danger` when the link does not resolve.
+ * `kind` is what says so — a row is a `symlink` only when `stat` through the
+ * link failed, which is a loop, a permission, or by far the common case a
+ * target that is not there — so a broken `~/.steampath` reads as broken at a
+ * glance. Only the target takes the color; the name goes on reading as the
+ * name, and this span is its own either way — the row's cursor and mark have
+ * never touched it — so a broken link is red on a marked row too.
+ */
+function symlinkTargetClass(index: number): string {
+  const entry = props.controller.state.entries[index]
+  return entry?.kind === 'symlink' ? 'text-danger' : 'text-fg-dim'
+}
+
+/**
  * In-place rename. The input is rendered only for the entry the controller is
  * editing, but it lives inside the v-for, so a string ref would collect an
  * array — a function ref keeps a single element handle. Focus and select the
@@ -2415,7 +2430,8 @@ function onRenameBlur(): void {
 
             <span
               v-if="entry.isSymlink && entry.symlinkTarget"
-              class="min-w-0 shrink truncate text-ui-sm text-fg-dim"
+              class="min-w-0 shrink truncate text-ui-sm"
+              :class="symlinkTargetClass(index)"
               :title="entry.symlinkTarget"
             >
               → {{ entry.symlinkTarget }}

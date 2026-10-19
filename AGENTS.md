@@ -270,7 +270,8 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   end. It is a band rather than a highlight, which is what lets every color on
   the row go on reading as itself: the name keeps the color its kind gives it,
   including the green of something runnable, the size and the date keep the plain
-  `text-fg` a filename has, and only the symlink target beside them stays dim.
+  `text-fg` a filename has, and only the symlink target beside them stays its
+  own color — the dim gray of a target that resolves, red when it does not.
   The band yields to the cursor's blue when the two coincide: the row then takes
   the cursor's ordinary band (active or inactive) and its text turns the mark's
   gold (`text-selected`, `--color-selected`). So the background keeps saying
@@ -297,6 +298,14 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   the name as it takes the rest of the row's text (`text-selected` overrides
   `text-runnable` in `nameClass`), and the green comes back with the cursor
   leaving.
+- **A broken symlink's target is red.** The `→ target` beside a symlink's name
+  is the dim gray (`text-fg-dim`) that keeps it secondary to the name, and
+  `text-danger` when the link does not resolve. Nothing has to test for that:
+  `kind` is `symlink` only when `stat` through the link failed — a loop, a
+  permission, and by far the most often a target that is not there, which is
+  what `~/.steampath` is. Only the target takes the color; the name goes on
+  reading as the name, and the span is its own under the cursor and on a marked
+  row too (`symlinkTargetClass` in `FilePanel.vue`).
 - **A file the user can run is run on Enter, in the shell the panes already
   have.** `shouldExecute` (`lib/executable.ts`) is the green rule less a
   `.desktop` — that one *describes* a program, and the system is what launches
