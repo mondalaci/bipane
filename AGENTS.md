@@ -113,7 +113,9 @@ the whole window (a triple-click on the file's name is the mouse's half of the
 gesture; pressed again it gives the window back, and `Escape` leaves the mode),
 `F3` opens a regular file
 read-only in the Monaco viewer, `F4` opens it for editing with Ctrl+S to save (a
-directory still descends on `F3`), `Insert` marks the current entry and moves down,
+directory still descends on `F3`), and a file the editor cannot show — a binary,
+or a read that fails — never opens it at all: the pane says so in its notice,
+which `Escape` puts away, `Insert` marks the current entry and moves down,
 right-click marks a row and dragging the held button paints that mark across
 rows (holding the left button and dragging instead moves the cursor from row to
 row), `Ctrl+O` toggles the terminal, `Ctrl+R` re-lists the active pane,
@@ -656,14 +658,31 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   Escape closing is *delegated* to the viewer (`confirmClose()` via a template
   ref), because only it knows whether an edit (F4) is dirty; a dirty buffer
   prompts before anything is discarded. `Escape` is claimed at the window level
-  rather than as a Monaco command so the error path (a binary or unreadable
-  file) has no editor yet still closes. Ctrl+S is a Monaco command, which the
-  capture handler deliberately lets through untouched. A *save* failure sets
+  rather than as a Monaco command so that even a viewer with no editor — one
+  whose Monaco would not load — still closes. Ctrl+S is a Monaco command, which
+  the capture handler deliberately lets through untouched. A *save* failure sets
   `saveError` (a header strip) rather than `error`, because `error` swaps the
   editor's container out of the DOM — using it would unmount the very buffer the
   user is still editing. A file the read had to truncate is refused for editing
   outright: saving it back would write only the first 8 MiB and silently destroy
-  the tail. **Viewing (F3) has no cursor, because its keys are a viewer's and not
+  the tail. **A file nothing can be shown of never opens the viewer at all.**
+  `openViewer` reads the file first and hands the `FileContent` to the viewer as
+  a prop, rather than letting the viewer read it: main refuses a binary or a
+  non-regular file, and that refusal is the *pane's* notice to give (`state.error`
+  in the footer, exactly like a failed copy), so F3/F4 on a binary leaves the
+  listing and the command line where they were instead of covering the window
+  with an overlay whose only content is the message. That notice is worded for
+  the user rather than quoted from main — `"x" looks binary — cannot be opened
+  for viewing` (or `for editing`, as F4 asked) — since `EBINARY: "x" looks
+  binary` says what the machine found and not what was wanted; every other
+  failure keeps the `code: message` the panes report elsewhere. Escape puts the
+  notice away, after the things it would otherwise leave (an open search box, a
+  typed command line, an expanded terminal). A read is async and the cursor can
+  move — or another F3/F4 start — while one is in flight, so a request token
+  guards it, and closing a viewer retires the pending read with it. The viewer
+  therefore exists only with something to show, and its own `error` is Monaco
+  failing to load.
+  **Viewing (F3) has no cursor, because its keys are a viewer's and not
   an editor's**: the arrows scroll the document a line at a time, the pages a
   screenful, and `Home`/`End` jump to its ends, instead of walking an invisible
   caret that would keep the view still until it had passed the bottom of the
@@ -685,10 +704,11 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   `editor.create` is what makes the base and language workers load (verified
   under both dev `http://` and the `file://` production build). F3 stays closed
   to anything that is not a regular file — opening a FIFO would block — and
-  main's `fs:read` re-checks that with `O_RDONLY | O_NONBLOCK` plus a NUL-byte
-  binary test and an 8 MiB ceiling, so the renderer only ever receives text an
-  editor can show (or a `truncated` flag), and `fs:write` (the save) refuses a
-  target that exists but is not a regular file or symlink.
+  main's `fs:read`, which the opener runs before the viewer exists, re-checks
+  that with `O_RDONLY | O_NONBLOCK` plus a NUL-byte binary test and an 8 MiB
+  ceiling, so the viewer is only ever opened for text an editor can show (or a
+  `truncated` flag), and `fs:write` (the save) refuses a target that exists but
+  is not a regular file or symlink.
 - **Focus model:** the command line holds focus whenever the terminal does not,
   so `focusPanes()` *focuses the command line* rather than blurring. The search
   box and the terminal are the other two focus targets. Navigation keys are

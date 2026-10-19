@@ -17,7 +17,7 @@ import {
   type StageRequest
 } from '@renderer/lib/preview'
 import { playSwapAnimation } from '@renderer/lib/swapAnimation'
-import type { PanelSide } from '@shared/types'
+import type { FileContent, FsError, PanelSide } from '@shared/types'
 
 /**
  * The app is a stack of workspaces — one tab each. A workspace owns its own
@@ -64,9 +64,16 @@ const shellInput = computed(() => shell.value.inputLine.value)
  * an overlay over the panes and terminal, so a non-null value is what "the
  * viewer is open" means — exactly like the staged dialogs below. `viewerMode`
  * is whether it was opened read-only (F3) or for editing (F4).
+ *
+ * The read is done before the viewer is opened, so a file the editor could
+ * never show — a binary, or one that is not a regular file — is answered by the
+ * pane's own notice instead of an overlay the user has to dismiss; the viewer is
+ * opened only for content that can be displayed, and is handed what was read
+ * rather than reading it again.
  */
 const viewerPath = ref<string | null>(null)
 const viewerMode = ref<'view' | 'edit'>('view')
+const viewerContent = ref<FileContent | null>(null)
 const viewerRef = ref<InstanceType<typeof FileViewer> | null>(null)
 
 /**
@@ -632,12 +639,65 @@ function moveWorkspace(from: number, to: number): void {
 }
 
 /**
+ * The pending viewer read, so a stale one cannot open the viewer over a newer
+ * request. Incremented when one starts, and when the viewer is closed.
+ */
+let viewerRequest = 0
+
+/**
+ * The last segment of a path. The renderer has no `node:path`, and the notice a
+ * refused open leaves only needs the name to point at.
+ */
+function baseName(target: string): string {
+  const slash = Math.max(target.lastIndexOf('/'), target.lastIndexOf('\\'))
+  return slash >= 0 ? target.slice(slash + 1) : target
+}
+
+/**
+ * What the pane says when a file cannot be opened in the viewer. A binary file
+ * is the one refusal worth explaining rather than quoting: the code and main's
+ * diagnostic (`EBINARY: "x" looks binary`) say what the machine found, not what
+ * the user asked for and did not get.
+ */
+function viewerRefusal(target: string, mode: 'view' | 'edit', error: FsError): string {
+  if (error.code === 'EBINARY') {
+    const wanted = mode === 'edit' ? 'editing' : 'viewing'
+    return `"${baseName(target)}" looks binary — cannot be opened for ${wanted}`
+  }
+  return `${error.code}: ${error.message}`
+}
+
+/**
  * F3 opens a regular file read-only in the Monaco viewer, F4 opens it for
  * editing. Directories keep their previous F3 meaning (descend), and anything
  * that is not a regular file — a socket, FIFO or device — is left alone rather
  * than fed to a text editor.
+ *
+ * The read happens first, so what the editor cannot show is never opened at all:
+ * a binary file (main refuses it) or a read that fails is reported in the pane's
+ * own notice, the way a failed copy is, instead of an overlay whose only content
+ * is that message. Escape dismisses that notice.
  */
-function openViewer(target: string, mode: 'view' | 'edit'): void {
+async function openViewer(
+  pane: PaneController,
+  target: string,
+  mode: 'view' | 'edit'
+): Promise<void> {
+  // A read is async, so the cursor can move — and another F3/F4 can start —
+  // while this one is in flight. The token keeps a stale read from opening the
+  // viewer over a newer request.
+  const request = (viewerRequest += 1)
+
+  const result = await window.bipane.fs.read(target)
+  if (request !== viewerRequest) return
+
+  if (!result.ok) {
+    pane.state.error = viewerRefusal(target, mode, result.error)
+    return
+  }
+
+  pane.state.error = null
+  viewerContent.value = result.data
   viewerMode.value = mode
   viewerPath.value = target
 }
@@ -648,7 +708,9 @@ function openViewer(target: string, mode: 'view' | 'edit'): void {
  */
 function closeViewer(): void {
   if (viewerRef.value && !viewerRef.value.confirmClose()) return
+  viewerRequest += 1
   viewerPath.value = null
+  viewerContent.value = null
   focusPanes()
 }
 
@@ -862,7 +924,14 @@ function handlePaneKey(event: KeyboardEvent): void {
       shell.value.clearInputLine()
       return
     }
-    if (terminalExpanded.value) collapseTerminal()
+    if (terminalExpanded.value) {
+      collapseTerminal()
+      return
+    }
+    // The pane's notice is the last thing Escape has to leave: a refused F3/F4
+    // (a binary file), a failed copy or a directory that would not list. It
+    // stays until dismissed or replaced, and this is the way to put it away.
+    if (pane.state.error !== null) pane.state.error = null
     return
   }
 
@@ -920,13 +989,15 @@ function handlePaneKey(event: KeyboardEvent): void {
       const entry = pane.current()
       if (!entry) break
       if (entry.isParent || entry.kind === 'directory') void pane.activate()
-      else if (entry.kind === 'file') openViewer(entry.path, 'view')
+      else if (entry.kind === 'file') void openViewer(pane, entry.path, 'view')
       break
     }
     case 'F4': {
       consume(event)
       const entry = pane.current()
-      if (entry && !entry.isParent && entry.kind === 'file') openViewer(entry.path, 'edit')
+      if (entry && !entry.isParent && entry.kind === 'file') {
+        void openViewer(pane, entry.path, 'edit')
+      }
       break
     }
     case 'F5':
@@ -1266,11 +1337,12 @@ onBeforeUnmount(() => {
       />
 
       <FileViewer
-        v-if="viewerPath !== null"
+        v-if="viewerPath !== null && viewerContent !== null"
         ref="viewerRef"
         :key="`${viewerMode}:${viewerPath}`"
         :path="viewerPath"
         :mode="viewerMode"
+        :content="viewerContent"
         @close="closeViewer"
       />
     </div>

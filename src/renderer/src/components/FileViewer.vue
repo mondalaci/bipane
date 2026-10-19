@@ -1,17 +1,25 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type * as MonacoApi from 'monaco-editor'
+import type { FileContent } from '@shared/types'
 import { languageFor, loadMonaco } from '@renderer/lib/monaco'
 
-const props = defineProps<{ path: string; mode: 'view' | 'edit' }>()
+/**
+ * `content` is the file, already read by the pane that opened the viewer: main
+ * refuses a file an editor cannot show — a binary, or anything that is not a
+ * regular file — so a viewer that exists always has something to display. That
+ * refusal is the pane's notice to give (see `openViewer` in App.vue), not an
+ * overlay whose only content is the message.
+ */
+const props = defineProps<{ path: string; mode: 'view' | 'edit'; content: FileContent }>()
 
 const emit = defineEmits<{ (event: 'close'): void }>()
 
 const host = ref<HTMLElement | null>(null)
 const loading = ref(true)
 /**
- * A failure that means there is nothing to show — a failed read, a binary or
- * oversized file, a Monaco that would not load. It replaces the editor area.
+ * A failure that leaves nothing to show — a Monaco that would not load, or an
+ * edit of a read that had to be truncated. It replaces the editor area.
  */
 const error = ref<string | null>(null)
 /**
@@ -20,7 +28,7 @@ const error = ref<string | null>(null)
  * the header instead of replacing it.
  */
 const saveError = ref<string | null>(null)
-const truncated = ref(false)
+const truncated = computed(() => props.content.truncated)
 const dirty = ref(false)
 const saving = ref(false)
 const saved = ref(false)
@@ -30,9 +38,9 @@ let model: MonacoApi.editor.ITextModel | null = null
 let changeSubscription: MonacoApi.IDisposable | null = null
 let savedTimer: number | null = null
 /**
- * The read and the Monaco import are both awaited, so the view can be unmounted
- * (Escape, another F3/F4) before either settles. Without this the late
- * continuation would create an editor in a detached element and leak it.
+ * The Monaco import is awaited, so the view can be unmounted (Escape, another
+ * F3/F4) before it settles. Without this the late continuation would create an
+ * editor in a detached element and leak it.
  */
 let disposed = false
 
@@ -74,21 +82,10 @@ async function save(): Promise<void> {
 }
 
 onMounted(async () => {
-  const result = await window.bipane.fs.read(props.path)
-  if (disposed) return
-
-  if (!result.ok) {
-    error.value = `${result.error.code}: ${result.error.message}`
-    loading.value = false
-    return
-  }
-
-  truncated.value = result.data.truncated
-
   // An edit of a truncated read would write back only the first chunk and
   // silently destroy the rest of the file, so that combination is refused
   // outright rather than opened read-only and hoped about.
-  if (editable.value && result.data.truncated) {
+  if (editable.value && truncated.value) {
     error.value = 'Too large to edit safely — only the first 8 MiB was read'
     loading.value = false
     return
@@ -109,9 +106,9 @@ onMounted(async () => {
   if (!element) return
 
   model = monaco.editor.createModel(
-    result.data.text,
-    languageFor(monaco, result.data.path),
-    monaco.Uri.file(result.data.path)
+    props.content.text,
+    languageFor(monaco, props.content.path),
+    monaco.Uri.file(props.content.path)
   )
 
   editor = monaco.editor.create(element, {
