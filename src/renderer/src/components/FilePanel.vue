@@ -2406,11 +2406,11 @@ function onRenameBlur(): void {
       </div>
 
       <div
-        class="pane-header-gutter flex h-6 shrink-0 items-center gap-2 border-b border-border-subtle bg-bg pl-3 text-ui-sm text-fg-dim"
+        class="pane-header-gutter flex h-6 shrink-0 items-center gap-1.5 border-b border-border-subtle bg-bg pl-3 text-ui-sm text-fg-dim"
       >
         <span class="min-w-0 flex-1">Name</span>
         <span class="w-16 shrink-0 text-right">Size</span>
-        <span class="w-28 shrink-0 text-right">Modified</span>
+        <span class="w-24 shrink-0 text-right">Modified</span>
       </div>
 
       <div
@@ -2482,7 +2482,7 @@ function onRenameBlur(): void {
         <li
           v-for="row in visibleRows"
           :key="row.entry.path"
-          class="flex cursor-default items-center gap-2 px-3 text-ui"
+          class="flex cursor-default items-center gap-1.5 px-3 text-ui"
           :style="{ height: `${ROW_HEIGHT}px` }"
           :class="rowClass(row.index)"
           @mousedown.left="onRowLeftDown(row.index)"
@@ -2532,7 +2532,7 @@ function onRenameBlur(): void {
             {{ row.entry.kind === 'directory' ? '' : formatSize(row.entry.size) }}
           </span>
           <span
-            class="w-28 shrink-0 text-right tabular-nums"
+            class="w-24 shrink-0 text-right tabular-nums"
             :class="metaClass(row.index)"
             :title="row.entry.isParent ? undefined : formatExactDate(row.entry.mtimeMs)"
           >
