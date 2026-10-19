@@ -15,6 +15,13 @@ export interface PaneState {
   cursor: number
   pageRows: number
   scrollAlign: ScrollAlign
+  /**
+   * Whether the move that just happened should be shown as a quick scroll
+   * rather than a jump. Only a page or an end-to-end jump asks for it — a
+   * one-row move must stay instant, or holding an arrow key would animate
+   * every step and lag behind the key. Reset once the pane has applied it.
+   */
+  animateScroll: boolean
   searchActive: boolean
   searchQuery: string
   selected: Set<string>
@@ -172,6 +179,7 @@ export function useDirectory(side: PanelSide): PaneController {
     cursor: 0,
     pageRows: 10,
     scrollAlign: 'nearest',
+    animateScroll: false,
     searchActive: false,
     searchQuery: '',
     selected: new Set<string>(),
@@ -212,6 +220,7 @@ export function useDirectory(side: PanelSide): PaneController {
 
     state.cursor = preserved >= 0 ? preserved : firstMatchIndex(state.entries)
     state.scrollAlign = 'nearest'
+    state.animateScroll = false
   }
 
   function openSearch(): void {
@@ -403,6 +412,7 @@ export function useDirectory(side: PanelSide): PaneController {
     state.itemCount = result.data.entries.length
     state.cursor = focusPath ? indexOfPath(rows, focusPath) : 0
     state.scrollAlign = 'nearest'
+    state.animateScroll = false
 
     // A filter and the marks belong to the directory they were set in.
     state.searchActive = false
@@ -455,6 +465,7 @@ export function useDirectory(side: PanelSide): PaneController {
 
   function moveCursor(delta: number): void {
     state.scrollAlign = 'nearest'
+    state.animateScroll = false
     state.cursor = clampCursorTo(state.cursor + delta)
   }
 
@@ -473,10 +484,12 @@ export function useDirectory(side: PanelSide): PaneController {
     } else {
       state.scrollAlign = direction > 0 ? 'start' : 'end'
     }
+    state.animateScroll = true
   }
 
   function moveTo(index: number): void {
     state.scrollAlign = 'nearest'
+    state.animateScroll = true
     state.cursor = clampCursorTo(index)
   }
 

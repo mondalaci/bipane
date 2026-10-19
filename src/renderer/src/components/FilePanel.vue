@@ -1811,7 +1811,40 @@ function onListResize(): void {
   scrollRowIntoView(props.controller.state.cursor, 'nearest')
 }
 
-function scrollRowIntoView(index: number, align: ScrollAlign): void {
+/**
+ * A quick, fixed-length scroll for a move that jumps a page or the whole list:
+ * long enough to read as motion, short enough that a held key never overtakes
+ * it. One animation runs at a time — a new move cancels the one before and
+ * starts from wherever it had got to, so the rows never chase two targets.
+ */
+const SCROLL_ANIM_MS = 140
+let scrollAnimation = 0
+
+function animateScrollTop(element: HTMLElement, target: number): void {
+  cancelAnimationFrame(scrollAnimation)
+  const from = element.scrollTop
+  const delta = target - from
+  if (delta === 0) return
+
+  const start = performance.now()
+  const step = (now: number): void => {
+    const t = Math.min((now - start) / SCROLL_ANIM_MS, 1)
+    const eased = 1 - Math.pow(1 - t, 3)
+    element.scrollTop = from + delta * eased
+    if (t < 1) scrollAnimation = requestAnimationFrame(step)
+  }
+  scrollAnimation = requestAnimationFrame(step)
+}
+
+function setScrollTop(element: HTMLElement, target: number, animated: boolean): void {
+  if (animated) animateScrollTop(element, target)
+  else {
+    cancelAnimationFrame(scrollAnimation)
+    element.scrollTop = target
+  }
+}
+
+function scrollRowIntoView(index: number, align: ScrollAlign, animated = false): void {
   const element = listEl.value
   if (!element) return
 
@@ -1821,30 +1854,33 @@ function scrollRowIntoView(index: number, align: ScrollAlign): void {
   const viewBottom = viewTop + element.clientHeight
 
   if (align === 'start') {
-    element.scrollTop = rowTop
+    setScrollTop(element, rowTop, animated)
     return
   }
 
   if (align === 'end') {
-    element.scrollTop = Math.max(rowBottom - element.clientHeight, 0)
+    setScrollTop(element, Math.max(rowBottom - element.clientHeight, 0), animated)
     return
   }
 
   if (rowTop < viewTop) {
-    element.scrollTop = rowTop
+    setScrollTop(element, rowTop, animated)
   } else if (rowBottom > viewBottom) {
-    element.scrollTop = rowBottom - element.clientHeight
+    setScrollTop(element, rowBottom - element.clientHeight, animated)
+  } else if (animated) {
+    setScrollTop(element, viewTop, false)
   }
 }
 
 watch(
   [() => props.controller.state.path, () => props.controller.state.cursor],
   async () => {
-    const { cursor, scrollAlign } = props.controller.state
+    const { cursor, scrollAlign, animateScroll } = props.controller.state
     props.controller.state.scrollAlign = 'nearest'
+    props.controller.state.animateScroll = false
     measureListSlack()
     await nextTick()
-    scrollRowIntoView(cursor, scrollAlign)
+    scrollRowIntoView(cursor, scrollAlign, animateScroll)
   }
 )
 
@@ -1874,6 +1910,7 @@ onBeforeUnmount(() => {
   stageBarObserver = null
   releaseStageSeek()
   cancelPreviewRead()
+  cancelAnimationFrame(scrollAnimation)
   window.removeEventListener('mouseup', endPainting)
 })
 
