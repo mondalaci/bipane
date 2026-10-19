@@ -83,7 +83,9 @@ src/renderer/src/lib/preview.ts              what a row is previewable as (image
                                              playing clip has got to (PlaybackClock),
                                              and what one pane asks another to
                                              display
-src/renderer/src/lib/monaco.ts               lazy monaco import + worker wiring
+src/renderer/src/lib/monaco.ts               lazy monaco import + worker wiring, and the
+                                             language a file is highlighted as (its name,
+                                             else its shebang)
 src/renderer/src/lib/fileIcon.ts             per-entry icon: name/extension -> 24x24 svg
                                              (FILENAME_ICONS, EXTENSION_ICONS, fallback text)
 src/renderer/src/lib/swapAnimation.ts        how a Ctrl+U exchange is shown: copies of
@@ -724,7 +726,16 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   that with `O_RDONLY | O_NONBLOCK` plus a NUL-byte binary test and an 8 MiB
   ceiling, so the viewer is only ever opened for text an editor can show (or a
   `truncated` flag), and `fs:write` (the save) refuses a target that exists but
-  is not a regular file or symlink.
+  is not a regular file or symlink. **The language is the file's name first and
+  its shebang second** (`languageFor` in `lib/monaco.ts`): an extension or a known
+  filename is the deliberate signal and wins (`foo.py` is python however it
+  starts), but the fallback is no signal at all, and the file it leaves grey is
+  exactly the extensionless script (`manage`, `configure`) whose first line names
+  its interpreter — so `#!/usr/bin/env python3` is highlighted as python. Only
+  interpreters with a tokenizer that fits are mapped: Monaco has no awk or expect,
+  and `fish`/`csh` are close enough to the shell tokenizer only in name, so those
+  stay plaintext — a script in the wrong colours reads worse than none. The
+  first line costs nothing to read because the viewer is handed the text anyway.
 - **Focus model:** the command line holds focus whenever the terminal does not,
   so `focusPanes()` *focuses the command line* rather than blurring. The search
   box and the terminal are the other two focus targets. Navigation keys are

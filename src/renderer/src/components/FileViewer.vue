@@ -107,7 +107,7 @@ onMounted(async () => {
 
   model = monaco.editor.createModel(
     props.content.text,
-    languageFor(monaco, props.content.path),
+    languageFor(monaco, props.content.path, props.content.text),
     monaco.Uri.file(props.content.path)
   )
 

@@ -53,14 +53,15 @@ export function loadMonaco(): Promise<typeof MonacoApi> {
   return pending
 }
 
+const PLAINTEXT = 'plaintext'
+
 /**
  * Best-effort language id for a filename, matching the `filenames` and
- * `extensions` the registered languages declare. Monaco would not guess on its
- * own when the language is left unspecified, and a wrong id would colour the
- * file with the wrong tokenizer, so an unrecognized name falls back to
- * plaintext.
+ * `extensions` the registered languages declare, or null when nothing claims
+ * the name. Monaco would not guess on its own when the language is left
+ * unspecified, and a wrong id would colour the file with the wrong tokenizer.
  */
-export function languageFor(monaco: typeof MonacoApi, target: string): string {
+function languageForName(monaco: typeof MonacoApi, target: string): string | null {
   const name = (target.split(/[\\/]/).pop() ?? '').toLowerCase()
   const dot = name.lastIndexOf('.')
   const extension = dot > 0 ? name.slice(dot) : ''
@@ -74,5 +75,110 @@ export function languageFor(monaco: typeof MonacoApi, target: string): string {
     }
   }
 
-  return 'plaintext'
+  return null
+}
+
+/**
+ * How the interpreters a shebang names map onto the languages Monaco has. Only
+ * names with a tokenizer that actually fits are here: an interpreter Monaco
+ * cannot colour (`awk`, `expect`, `fish`) is left plaintext rather than handed
+ * to whichever tokenizer looks closest, for the same reason a wrong extension
+ * would be — a script full of the wrong colours reads worse than none.
+ */
+const INTERPRETER_LANGUAGES: Record<string, string> = {
+  sh: 'shell',
+  bash: 'shell',
+  dash: 'shell',
+  ash: 'shell',
+  ksh: 'shell',
+  zsh: 'shell',
+  python: 'python',
+  ruby: 'ruby',
+  perl: 'perl',
+  php: 'php',
+  lua: 'lua',
+  node: 'javascript',
+  nodejs: 'javascript',
+  deno: 'javascript',
+  bun: 'javascript',
+  tclsh: 'tcl',
+  wish: 'tcl',
+  rscript: 'r',
+  julia: 'julia',
+  swift: 'swift',
+  elixir: 'elixir',
+  powershell: 'powershell',
+  pwsh: 'powershell',
+  coffee: 'coffee',
+  scala: 'scala'
+}
+
+/** The last segment of a path, lowercased, without a Windows `.exe`. */
+function commandName(word: string): string {
+  const base = (word.split(/[\\/]/).pop() ?? '').toLowerCase()
+  return base.endsWith('.exe') ? base.slice(0, -4) : base
+}
+
+/**
+ * The interpreter a script's first line names, if it opens with a shebang —
+ * `python` for `#!/usr/bin/env python3`. The `/usr/bin/env` hop is followed
+ * (its own `-S` and other options skipped), since a script that does not want
+ * to hard-code a path is written that way, and a version suffix is dropped
+ * (`python3.11` is python, `php8` is php).
+ */
+function shebangInterpreter(text: string): string | null {
+  // Only the first line matters, and only its head: a shebang is short, and the
+  // kernel reads no more of the file than this either. A byte-order mark is not
+  // part of it, but it is what a file saved that way actually starts with.
+  const head = text.slice(0, 256).replace(/^\uFEFF/, '')
+  const first = head.split('\n', 1)[0]?.trim() ?? ''
+  if (!first.startsWith('#!')) return null
+
+  const words = first.slice(2).trim().split(/\s+/).filter(Boolean)
+  let index = 0
+  if (commandName(words[0] ?? '') === 'env') {
+    index = 1
+    while (words[index]?.startsWith('-')) index += 1
+  }
+
+  const command = commandName(words[index] ?? '')
+  return command ? command.replace(/\d+(\.\d+)*$/, '') : null
+}
+
+/**
+ * The language a shebang asks for, or null when it names nothing Monaco can
+ * colour. Checked against the registered languages as well as the table: an id
+ * a future Monaco no longer ships would be plaintext rather than a model with a
+ * language that does not exist.
+ */
+function languageForShebang(monaco: typeof MonacoApi, text: string): string | null {
+  const interpreter = shebangInterpreter(text)
+  if (interpreter === null) return null
+
+  const id = INTERPRETER_LANGUAGES[interpreter]
+  if (id === undefined) return null
+
+  const registered = monaco.languages.getLanguages().some((language) => language.id === id)
+  return registered ? id : null
+}
+
+/**
+ * Best-effort language id for the file about to be shown: its name first, and
+ * its shebang when the name says nothing.
+ *
+ * An extension or a known filename is the deliberate signal — `foo.py` is
+ * python however it starts — but the fallback is no signal at all, and the file
+ * it leaves grey is exactly the extensionless script (`manage`, `configure`,
+ * a `run` in a crate), whose first line states its language outright. Since the
+ * viewer is handed the file's text anyway, that line costs nothing to read, and
+ * a name another language claims keeps winning, so this can only add colour.
+ */
+export function languageFor(
+  monaco: typeof MonacoApi,
+  target: string,
+  text = ''
+): string {
+  const named = languageForName(monaco, target)
+  if (named !== null && named !== PLAINTEXT) return named
+  return languageForShebang(monaco, text) ?? PLAINTEXT
 }
