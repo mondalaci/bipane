@@ -1888,10 +1888,29 @@ function onStageWheel(event: WheelEvent): void {
 }
 
 /**
- * A left-click on the footer's thumbnail — the mouse's Enter: show this pane's
- * media at full size in the other one.
+ * A left-click on the footer's thumbnail — the clip's own play/pause, the
+ * gesture the enlarged display already answers, brought to the small preview.
+ * The two clicks of a double-click toggle it there and back, so the
+ * double-click that follows — the mouse's Enter, opening the row's media in the
+ * other pane — leaves the clip as it found it; a third click escalates once
+ * more, over the whole window, exactly as a triple-click on the row's name
+ * does. An image has nothing to pause, so a single click on one is simply
+ * nothing.
  */
 function onPreviewClick(event: MouseEvent): void {
+  if (event.button !== 0) return
+  if (event.detail === 3) {
+    emit('fullscreen')
+    return
+  }
+  togglePreviewPlayback()
+}
+
+/**
+ * A double left-click on the footer's thumbnail — the mouse's Enter on the
+ * cursor row: show this pane's media at full size in the other one.
+ */
+function onPreviewDblclick(event: MouseEvent): void {
   if (event.button !== 0) return
   emit('stage-on')
 }
@@ -2572,6 +2591,7 @@ function onRenameBlur(): void {
             class="relative flex shrink-0 items-center justify-center overflow-hidden rounded border border-border-subtle bg-bg"
             @wheel="onFooterWheel"
             @click="onPreviewClick"
+            @dblclick="onPreviewDblclick"
           >
             <img
               v-if="showImage"

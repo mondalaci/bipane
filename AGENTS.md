@@ -476,11 +476,19 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   element, still wherever the clip had got to, and a clip main has to encode goes
   on streaming instead of being asked for again at that offset. Switching tabs or
   closing one leaves the mode too, since the panes it belonged to are gone. The
-  mouse makes the same two gestures: a left-click on the footer
+  mouse makes the same two gestures: a double-click on the footer
   thumbnail asks for the display when one is not already up (`stage-on` →
   `showStage`) — as does a double-click on the row of an image or a video, which
   is `Enter` on it without its toggling back off (`activate` → `activateRow`) —
-  and a quick right-click on the pane showing it leaves the mode
+  while a single click on that thumbnail is the clip's own play/pause, and a
+  triple one escalates past the pane to the whole window (`fullscreen` →
+  `openFullscreen`), the same escalation a triple-click on a row's name makes.
+  The single and triple clicks reach the thumbnail through one `click` handler
+  that reads the browser's click count, and the double sits on `dblclick` as on
+  the enlarged display — where each of a double-click's two clicks toggles
+  play/pause, so the pair cancels out and only the pane's display is left to
+  open, leaving the clip as it was found — and a quick right-click on the pane
+  showing it leaves the mode
   (`stage-off` → `exitStage`) — the mouse's `Enter` and `Escape`; a held right
   press, or one that wheel-scrubs the clip, is not that click. A display's
   media fills the pane however small the file is
