@@ -435,13 +435,14 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   is not the element (`overStageMedia`): the wheel is measured against the
   picture's own rectangle — an image's element is the whole stage with the picture
   letterboxed inside it — and against the transport directly under it, so a wheel
-  on the picture or the bar seeks, while one anywhere else in the pane — the
-  letterbox, the padding, an emptied display — steps the *folder being browsed*
-  instead: one row a notch, up for the row above and down for the one below, which
-  a display follows on its own. That is a way of flicking through what a display
-  is showing without leaving the mode, and a wheel turned with a button held is
-  part of that press's gesture here too, so its release neither leaves the mode
-  nor counts as a click.
+  on a clip's picture or on its bar seeks, while one over a *picture* — an image,
+  which has nothing to move within — is the folder's wheel like any other, as is
+  one anywhere else in the pane — the letterbox, the padding, an emptied display
+  — which steps the *folder being browsed* instead: one row a notch, up for the
+  row above and down for the one below, which a display follows on its own. That
+  is a way of flicking through what a display is showing without leaving the
+  mode, and a wheel turned with a button held is part of that press's gesture
+  here too, so its release neither leaves the mode nor counts as a click.
 - **An action on a clip is answered by a YouTube-style on-screen display.** A
   pause, a resume or a seek flashes a glyph over the picture that holds for a
   moment and fades on its own (`PlaybackOsd.vue`, `styles/osd.css`) — nothing is

@@ -1834,16 +1834,17 @@ function overStageMedia(event: WheelEvent): boolean {
 }
 
 /**
- * The wheel in the display. Over the media it is the scrubber it has always been:
- * a clip steps through what is playing, and an image has nothing to move within.
- * Anywhere else in the pane — the letterbox around a picture, the padding, an
- * emptied display — there is nothing of the clip under the pointer, so there the
- * wheel is a way of flicking through the folder being browsed instead: up for the
- * row above, down for the one below, which the display follows on its own.
+ * The wheel in the display. Over a clip it is the scrubber it has always been:
+ * what is playing steps through what is on screen, and the transport beneath it
+ * belongs to the same gesture. A wheel over a picture is not the clip's — an
+ * image has nothing to move within — so it steps the folder being browsed: up
+ * for the row above and down for the one below, which the display follows on its
+ * own. So does the wheel anywhere else in the pane — the letterbox, the padding,
+ * an emptied display — where there is nothing of the clip under the pointer
+ * either.
  */
 function onStageWheel(event: WheelEvent): void {
-  if (overStageMedia(event)) {
-    if (!wheelScrub(event, stageMedia.value)) return
+  if (overStageMedia(event) && wheelScrub(event, stageMedia.value)) {
     noteWheelPress(event)
     return
   }
