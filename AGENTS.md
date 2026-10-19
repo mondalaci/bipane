@@ -117,7 +117,14 @@ gesture; pressed again it gives the window back, and `Escape` leaves the mode),
 read-only in the Monaco viewer, `F4` opens it for editing with Ctrl+S to save (a
 directory still descends on `F3`), and a file the editor cannot show — a binary,
 or a read that fails — never opens it at all: the pane says so in its notice,
-which `Escape` puts away, `Insert` marks the current entry and moves down,
+which `Escape` puts away, `Insert` marks the current entry and moves down, `*`
+marks every file in the pane — or unmarks them when they are all marked, so one
+key answers both, and only files either way: a folder is marked by hand when it
+is wanted, since a key that swept them up too would drag them into whatever
+transfer follows. "File" is every row that is not a folder, so a symlink counts
+even when it dangles (a broken `~/.steampath` is a `symlink` row, not a `file`
+one) while a link *to* a folder is a folder like any other — claimed only while
+the command line holds nothing, since a typed `*` is a glob for the shell,
 right-click marks a row and dragging the held button paints that mark across
 rows (holding the left button and dragging instead moves the cursor from row to
 row), `Ctrl+O` toggles the terminal, `Ctrl+R` re-lists the active pane,

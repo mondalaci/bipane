@@ -57,6 +57,7 @@ export interface PaneController {
   selectedCount(): number
   setSelected(path: string, value: boolean): void
   toggleSelection(): void
+  toggleSelectAll(): void
   clearSelection(): void
   selectionTargets(): PaneEntry[]
   deletionTargets(): PaneEntry[]
@@ -540,6 +541,29 @@ export function useDirectory(side: PanelSide, options: PaneOptions): PaneControl
   }
 
   /**
+   * Mark every file in the pane, or unmark them when they are all marked
+   * already — the one key that means "all of this". "File" here is every row
+   * that is not a folder, which is what the actions downstream can take: a
+   * symlink counts even when it dangles (`~/.steampath`), since `lstat` is all
+   * the kind it can have, while a link *to* a directory is a directory like any
+   * other and is left out. Only files are touched, both ways: a folder is marked
+   * by hand when it is wanted (Insert), and a key that swept them up too would
+   * drag them into whatever transfer follows. The ".." row is not an entry. Drawn
+   * from `allRows` rather than the filtered view, exactly as `selectionTargets`
+   * is, so a filter can never hide a mark from the actions.
+   */
+  function toggleSelectAll(): void {
+    const files = state.allRows.filter((row) => !row.isParent && row.kind !== 'directory')
+    if (files.length === 0) return
+
+    const allMarked = files.every((row) => state.selected.has(row.path))
+    for (const row of files) {
+      if (allMarked) state.selected.delete(row.path)
+      else state.selected.add(row.path)
+    }
+  }
+
+  /**
    * What a transfer acts on: the marks if any are set, otherwise the entry
    * under the cursor. The ".." row is never a target, and a filter does not
    * hide a mark — every mark in the pane is used, matched in listing order.
@@ -700,6 +724,7 @@ export function useDirectory(side: PanelSide, options: PaneOptions): PaneControl
     selectedCount,
     setSelected,
     toggleSelection,
+    toggleSelectAll,
     clearSelection,
     selectionTargets,
     deletionTargets,

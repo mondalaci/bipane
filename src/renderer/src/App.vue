@@ -984,6 +984,21 @@ function handlePaneKey(event: KeyboardEvent): void {
       consume(event)
       pane.toggleSelection()
       break
+    case '*': {
+      // With nothing typed on the command line the star is "all of this pane":
+      // it marks every file — or unmarks them when they are all marked already,
+      // so one key answers both — and "file" is every row that is not a folder.
+      // A folder is left alone either way, marked by hand when it is wanted,
+      // while a symlink counts even when it dangles, since that is exactly what
+      // the pane shows it as. A typed line keeps its star — that one is a glob
+      // for the shell — and so does an open search box, which is where a star
+      // typed with one up belongs. Held down, a repeat would only flip the pane
+      // back and forth, so only the first press counts.
+      if (searching || hasInput) return
+      consume(event)
+      if (!event.repeat) pane.toggleSelectAll()
+      break
+    }
     case 'F3': {
       consume(event)
       const entry = pane.current()
