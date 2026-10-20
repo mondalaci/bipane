@@ -46,7 +46,7 @@ export interface PaneController {
   readonly state: PaneState
   init(): Promise<void>
   navigateTo(dir: string, focusPath?: string): Promise<void>
-  refresh(): Promise<void>
+  refresh(focusPath?: string): Promise<void>
   goUp(): Promise<void>
   moveCursor(delta: number): void
   movePage(direction: 1 | -1): void
@@ -445,8 +445,13 @@ export function useDirectory(side: PanelSide, options: PaneOptions): PaneControl
    * cursor on the same entry (matching by path, so it follows a rename-free
    * re-sort) and leaves any active filter alone: a command that adds or removes
    * a file should not also throw away where the user was looking.
+   *
+   * `focusPath` is for the caller that knows where the entry under the cursor
+   * went — a move that renamed it in place, so its old path no longer exists.
+   * The cursor lands on that new path instead of falling back to the first row,
+   * exactly as navigateTo places it.
    */
-  async function refresh(): Promise<void> {
+  async function refresh(focusPath?: string): Promise<void> {
     if (!state.path || state.loading) return
 
     const result = await window.bipane.fs.list(state.path)
@@ -464,7 +469,8 @@ export function useDirectory(side: PanelSide, options: PaneOptions): PaneControl
     state.path = result.data.path
     state.parent = result.data.parent
     state.allRows = rows
-    applyFilter(previous)
+    const anchor = focusPath ? rows.find((row) => row.path === focusPath) ?? previous : previous
+    applyFilter(anchor)
     markFresh(diffEntries(before, rows))
     watchCurrent()
   }
@@ -641,7 +647,19 @@ export function useDirectory(side: PanelSide, options: PaneOptions): PaneControl
       if (!failedPaths.has(target.path)) state.selected.delete(target.path)
     }
 
-    await refresh()
+    // A single entry moved to a name inside this same directory is a rename in
+    // place (the F6 dialog's non-directory destination): its old path is gone,
+    // so without this refresh would fall back to the first row. Hand the new
+    // path in so the cursor follows the entry, as an in-place Shift+F6 does.
+    const under = current()
+    const renamedTo = result.data.moved.length === 1 ? result.data.moved[0] : undefined
+    const movesInPlace =
+      under !== undefined &&
+      targets.length === 1 &&
+      targets[0]?.path === under.path &&
+      renamedTo !== undefined &&
+      parentOf(renamedTo) === state.path
+    await refresh(movesInPlace ? renamedTo : undefined)
 
     if (result.data.failed.length > 0) {
       const [first] = result.data.failed
