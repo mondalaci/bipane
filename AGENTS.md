@@ -787,11 +787,20 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   an editor's**: the arrows scroll the document a line at a time, the pages a
   screenful, and `Home`/`End` jump to its ends, instead of walking an invisible
   caret that would keep the view still until it had passed the bottom of the
-  screen. The remap is `editor.addCommand(...)` at the core commands' own
+  screen. The remap is `editor.addAction(...)` — not `addCommand` — at the core
+  commands' own
   `scroll*` ids (`scrollLineUp`/`scrollLineDown`/`scrollPageUp`/`scrollPageDown`/
   `scrollEditorTop`/`scrollEditorBottom`), gated on `'textInputFocus'` so it stays
   out of the find box the way Monaco's core navigation does, and only in view
-  mode — F4 keeps the caret. The caret itself is hidden by
+  mode — F4 keeps the caret. `addAction` is not a style preference: a standalone
+  editor's `addCommand` registers a *global* dynamic keybinding whose `when`
+  clause carries no editor scope and which nothing unregisters, and its weight
+  (1000) beats Monaco's own core bindings (0). Such a leaked binding outlives
+  the viewer and swallows the arrow keys of a later F4 editor — its handler
+  triggering the scroll on a disposed editor, so the caret never moves —
+  which is exactly the bug this replaced. `addAction` scopes the binding to the
+  editor's own `editorId` and returns a disposable, so the remap lives and dies
+  with the view. The caret itself is hidden by
   `styles/viewer.css` (`.viewer-no-cursor .cursors-layer { display: none }`, the
   host carrying that class only when read-only), which leaves the selection
   highlight — a different layer — so the mouse still selects and copies; the

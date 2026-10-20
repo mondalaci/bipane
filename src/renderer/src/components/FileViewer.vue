@@ -36,6 +36,13 @@ const saved = ref(false)
 let editor: MonacoApi.editor.IStandaloneCodeEditor | null = null
 let model: MonacoApi.editor.ITextModel | null = null
 let changeSubscription: MonacoApi.IDisposable | null = null
+/**
+ * The keybindings the read-only remap registered (see the viewer's vertical
+ * keys). They must be disposed with the editor: a standalone editor's
+ * `addAction` hands back a disposable, and dropping it lets the binding outlive
+ * the viewer and shadow the arrow keys in a later editor.
+ */
+let viewKeyDisposables: MonacoApi.IDisposable[] = []
 let savedTimer: number | null = null
 /**
  * The Monaco import is awaited, so the view can be unmounted (Escape, another
@@ -139,9 +146,16 @@ onMounted(async () => {
     // go to its ends. Left as Monaco's own, they would move a caret the user
     // cannot see, and the view would not begin to move until that caret had
     // walked past the bottom of the screen.
-    const scroll = (handler: string) => (): void => {
-      editor?.trigger('viewer', handler, null)
-    }
+    //
+    // The remap goes through `addAction` rather than `addCommand` on purpose.
+    // A standalone editor's `addCommand` registers a *global* dynamic
+    // keybinding: its `when` clause is only the context given here, with no
+    // editor scope, and nothing unregisters it when the viewer closes. Such a
+    // binding then outlives the viewer and its weight beats Monaco's built-in
+    // arrow keys, so a later edit-mode (F4) editor has its Up/Down swallowed by
+    // a handler that triggers on the disposed view editor — the caret never
+    // moves. `addAction` scopes the binding to this editor's own `editorId` and
+    // returns a disposable, so the remap is the viewer's alone and ends with it.
     const verticalKeys: Array<[number, string]> = [
       [monaco.KeyCode.UpArrow, 'scrollLineUp'],
       [monaco.KeyCode.DownArrow, 'scrollLineDown'],
@@ -150,10 +164,18 @@ onMounted(async () => {
       [monaco.KeyCode.Home, 'scrollEditorTop'],
       [monaco.KeyCode.End, 'scrollEditorBottom']
     ]
-    // 'textInputFocus' keeps these off the find box, exactly as Monaco's own
-    // core navigation does.
     for (const [key, handler] of verticalKeys) {
-      editor.addCommand(key, scroll(handler), 'textInputFocus')
+      viewKeyDisposables.push(
+        editor.addAction({
+          id: `bipane.viewer.${handler}`,
+          label: handler,
+          keybindings: [key],
+          // 'textInputFocus' keeps these off the find box, exactly as Monaco's
+          // own core navigation does.
+          precondition: 'textInputFocus',
+          run: (target) => target.trigger('viewer', handler, null)
+        })
+      )
     }
   }
 
@@ -163,10 +185,19 @@ onMounted(async () => {
 
   if (editable.value) {
     // Ctrl/Cmd+S is the save gesture; the window-level handler lets it through
-    // to the editor while the viewer is open.
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-      void save()
-    })
+    // to the editor while the viewer is open. Registered through `addAction`
+    // for the same reason as the read-only keys above: an unregistered global
+    // binding from a previous viewer would shadow this one.
+    viewKeyDisposables.push(
+      editor.addAction({
+        id: 'bipane.viewer.save',
+        label: 'Save',
+        keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS],
+        run: () => {
+          void save()
+        }
+      })
+    )
   }
 
   loading.value = false
@@ -179,6 +210,8 @@ onBeforeUnmount(() => {
   savedTimer = null
   changeSubscription?.dispose()
   changeSubscription = null
+  for (const disposable of viewKeyDisposables) disposable.dispose()
+  viewKeyDisposables = []
   editor?.dispose()
   editor = null
   model?.dispose()
