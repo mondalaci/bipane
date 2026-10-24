@@ -20,7 +20,16 @@ There is no linter or test runner configured yet.
 ## Architecture
 
 ```
-src/main/index.ts        window lifecycle, single-instance lock
+src/main/index.ts        window lifecycle, single-instance lock; opens with the
+                         geometry windowState.ts remembered
+src/main/windowState.ts  the window's size, position and maximized flag, kept in
+                         userData/window-state.json: only the *normal* bounds are
+                         stored (a maximized window's own bounds are the screen),
+                         written on a debounce so a drag is one save rather than
+                         one per frame, and restored only if the display it was
+                         on is still attached — a window placed on a coordinate
+                         no display covers cannot be reached, so its position is
+                         dropped and its size clamped to the display it lands on
 src/main/ipc/fs.ts       IPC: fs:home, fs:list, fs:read, fs:write, fs:read-image,
                          fs:image-size, fs:open, fs:reveal
                          (fs:read/fs:write serve the viewer: regular text files

@@ -5,6 +5,7 @@ import { registerFsHandlers } from './ipc/fs'
 import { killAllSessions, registerPtyHandlers } from './ipc/pty'
 import { closeAllWatchers, registerWatchHandlers } from './ipc/watch'
 import { registerWindowHandlers } from './ipc/window'
+import { restoreWindowState, trackWindowState } from './windowState'
 import {
   killAllTranscodes,
   registerMediaHandlers,
@@ -31,9 +32,11 @@ function resolvePreload(): string {
 }
 
 function createWindow(): BrowserWindow {
+  const restored = restoreWindowState()
   const window = new BrowserWindow({
-    width: 1280,
-    height: 820,
+    width: restored.width,
+    height: restored.height,
+    ...(restored.x === null || restored.y === null ? {} : { x: restored.x, y: restored.y }),
     minWidth: 720,
     minHeight: 420,
     show: false,
@@ -49,6 +52,13 @@ function createWindow(): BrowserWindow {
       spellcheck: false
     }
   })
+
+  // Maximized before the window is shown, so it comes up the way it was left
+  // rather than flashing its restored size first. The title bar asks
+  // `window:is-maximized` on mount, so it needs no notification for this one.
+  if (restored.maximized) window.maximize()
+
+  trackWindowState(window)
 
   window.once('ready-to-show', () => window.show())
 
