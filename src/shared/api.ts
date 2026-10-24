@@ -14,7 +14,7 @@ import type {
   Result
 } from './types'
 
-export interface BipaneFsApi {
+export interface McFsApi {
   home(): Promise<string>
   list(dir: string): Promise<Result<DirListing>>
   /**
@@ -76,7 +76,7 @@ export interface BipaneFsApi {
   onChanged(handler: (event: FsChangeEvent) => void): () => void
 }
 
-export interface BipanePtyApi {
+export interface McPtyApi {
   create(id: string, options: PtySpawnOptions): Promise<void>
   write(id: string, data: string): void
   resize(id: string, cols: number, rows: number): void
@@ -86,7 +86,7 @@ export interface BipanePtyApi {
   onExit(handler: (event: PtyExitEvent) => void): () => void
 }
 
-export interface BipaneWindowApi {
+export interface McWindowApi {
   minimize(): Promise<void>
   toggleMaximize(): Promise<boolean>
   close(): Promise<void>
@@ -94,8 +94,8 @@ export interface BipaneWindowApi {
   onMaximizedChange(handler: (maximized: boolean) => void): () => void
 }
 
-export interface BipaneApi {
-  fs: BipaneFsApi
-  pty: BipanePtyApi
-  win: BipaneWindowApi
+export interface McApi {
+  fs: McFsApi
+  pty: McPtyApi
+  win: McWindowApi
 }

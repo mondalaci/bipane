@@ -754,7 +754,7 @@ async function openViewer(
   // viewer over a newer request.
   const request = (viewerRequest += 1)
 
-  const result = await window.bipane.fs.read(target)
+  const result = await window.mc.fs.read(target)
   if (request !== viewerRequest) return
 
   if (!result.ok) {

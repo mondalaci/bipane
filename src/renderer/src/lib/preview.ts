@@ -22,7 +22,7 @@ export function canTranscodePreview(): boolean {
 
 /** Ask main once, early, so the answer is there before a cursor lands on a file. */
 export async function loadTranscodeSupport(): Promise<void> {
-  transcode.value = await window.bipane.fs.canTranscode()
+  transcode.value = await window.mc.fs.canTranscode()
 }
 
 /** What a pane can show of the cursor's row: an image, or a video. */
@@ -69,7 +69,7 @@ export function probeVideoCodec(target: PreviewTarget | null): void {
   if (videoCodecs.value.has(identity) || probing.has(identity)) return
 
   probing.add(identity)
-  void window.bipane.fs.videoCodec(target.path).then((codec) => {
+  void window.mc.fs.videoCodec(target.path).then((codec) => {
     probing.delete(identity)
     videoCodecs.value.set(identity, codec)
   })

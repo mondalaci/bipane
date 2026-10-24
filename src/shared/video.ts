@@ -83,7 +83,7 @@ export function codecNeedsTranscode(codec: string | null): boolean {
  * megabytes — so main serves it as a ranged stream and the media element fetches
  * only what it plays.
  */
-export const MEDIA_SCHEME = 'bipane-media'
+export const MEDIA_SCHEME = 'mc-media'
 
 function extensionOf(name: string): string | null {
   const lower = name.toLowerCase()

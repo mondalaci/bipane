@@ -70,7 +70,7 @@ async function save(): Promise<void> {
   saving.value = true
   saveError.value = null
 
-  const result = await window.bipane.fs.write(props.path, current.getValue())
+  const result = await window.mc.fs.write(props.path, current.getValue())
   saving.value = false
   if (disposed) return
 
@@ -167,7 +167,7 @@ onMounted(async () => {
     for (const [key, handler] of verticalKeys) {
       viewKeyDisposables.push(
         editor.addAction({
-          id: `bipane.viewer.${handler}`,
+          id: `mc.viewer.${handler}`,
           label: handler,
           keybindings: [key],
           // 'textInputFocus' keeps these off the find box, exactly as Monaco's
@@ -190,7 +190,7 @@ onMounted(async () => {
     // binding from a previous viewer would shadow this one.
     viewKeyDisposables.push(
       editor.addAction({
-        id: 'bipane.viewer.save',
+        id: 'mc.viewer.save',
         label: 'Save',
         keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS],
         run: () => {

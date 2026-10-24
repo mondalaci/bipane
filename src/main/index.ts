@@ -37,7 +37,7 @@ function createWindow(): BrowserWindow {
     minWidth: 720,
     minHeight: 420,
     show: false,
-    title: 'Bipane',
+    title: 'Monda Commander',
     backgroundColor: APP_BACKGROUND,
     icon: APP_ICON,
     frame: false,

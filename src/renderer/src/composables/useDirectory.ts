@@ -298,7 +298,7 @@ export function useDirectory(side: PanelSide, options: PaneOptions): PaneControl
       return
     }
 
-    const result = await window.bipane.fs.rename(source, target)
+    const result = await window.mc.fs.rename(source, target)
     if (!result.ok) {
       state.error = `${result.error.code}: ${result.error.message}`
       return
@@ -383,7 +383,7 @@ export function useDirectory(side: PanelSide, options: PaneOptions): PaneControl
     if (watchedPath === null) return
     const dir = watchedPath
     watchedPath = null
-    void window.bipane.fs.unwatch(dir)
+    void window.mc.fs.unwatch(dir)
   }
 
   function watchCurrent(): void {
@@ -391,10 +391,10 @@ export function useDirectory(side: PanelSide, options: PaneOptions): PaneControl
     unwatchCurrent()
     if (!state.path) return
     watchedPath = state.path
-    void window.bipane.fs.watch(state.path)
+    void window.mc.fs.watch(state.path)
   }
 
-  const stopWatching = window.bipane.fs.onChanged((event) => {
+  const stopWatching = window.mc.fs.onChanged((event) => {
     if (event.path === state.path) void refresh()
   })
 
@@ -408,7 +408,7 @@ export function useDirectory(side: PanelSide, options: PaneOptions): PaneControl
     state.loading = true
     state.error = null
 
-    const result = await window.bipane.fs.list(dir)
+    const result = await window.mc.fs.list(dir)
     state.loading = false
 
     if (!result.ok) {
@@ -454,7 +454,7 @@ export function useDirectory(side: PanelSide, options: PaneOptions): PaneControl
   async function refresh(focusPath?: string): Promise<void> {
     if (!state.path || state.loading) return
 
-    const result = await window.bipane.fs.list(state.path)
+    const result = await window.mc.fs.list(state.path)
     if (!result.ok) {
       state.error = `${result.error.code}: ${result.error.message}`
       return
@@ -598,7 +598,7 @@ export function useDirectory(side: PanelSide, options: PaneOptions): PaneControl
     const targets = selectionTargets()
     if (targets.length === 0 || !destination) return null
 
-    const result = await window.bipane.fs.copy(
+    const result = await window.mc.fs.copy(
       targets.map((target) => target.path),
       destination,
       state.path
@@ -630,7 +630,7 @@ export function useDirectory(side: PanelSide, options: PaneOptions): PaneControl
     const targets = selectionTargets()
     if (targets.length === 0 || !destination) return null
 
-    const result = await window.bipane.fs.move(
+    const result = await window.mc.fs.move(
       targets.map((target) => target.path),
       destination,
       state.path
@@ -673,7 +673,7 @@ export function useDirectory(side: PanelSide, options: PaneOptions): PaneControl
     const targets = deletionTargets()
     if (targets.length === 0) return
 
-    const result = await window.bipane.fs.remove(targets.map((target) => target.path))
+    const result = await window.mc.fs.remove(targets.map((target) => target.path))
     if (!result.ok) {
       state.error = `${result.error.code}: ${result.error.message}`
       return
@@ -747,12 +747,12 @@ export function useDirectory(side: PanelSide, options: PaneOptions): PaneControl
       return
     }
 
-    const message = await window.bipane.fs.open(entry.path)
+    const message = await window.mc.fs.open(entry.path)
     if (message) state.error = message
   }
 
   async function init(): Promise<void> {
-    const home = await window.bipane.fs.home()
+    const home = await window.mc.fs.home()
     await navigateTo(home)
   }
 

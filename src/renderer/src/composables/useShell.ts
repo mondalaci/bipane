@@ -81,7 +81,7 @@ export function createShell(id: string): Shell {
   async function refreshState(): Promise<void> {
     if (!started.value) return
 
-    const snapshot = await window.bipane.pty.state(id)
+    const snapshot = await window.mc.pty.state(id)
     idle.value = snapshot.idle
     if (snapshot.cwd && snapshot.cwd !== cwd.value) cwd.value = snapshot.cwd
   }
@@ -113,7 +113,7 @@ export function createShell(id: string): Shell {
     // must not read as this one having already ended.
     exitCode.value = null
 
-    const created = window.bipane.pty.create(id, {
+    const created = window.mc.pty.create(id, {
       cwd: spawnCwd,
       cols: Math.max(cols, 2),
       rows: Math.max(rows, 1)
@@ -121,11 +121,11 @@ export function createShell(id: string): Shell {
 
     let cancelled = false
 
-    const onDataDisposer = window.bipane.pty.onData((event) => {
+    const onDataDisposer = window.mc.pty.onData((event) => {
       if (event.id === id) handleData(event.data)
     })
 
-    const onExitDisposer = window.bipane.pty.onExit((event) => {
+    const onExitDisposer = window.mc.pty.onExit((event) => {
       if (event.id !== id) return
       if (cancelled) return
       exitCode.value = event.exitCode
@@ -151,7 +151,7 @@ export function createShell(id: string): Shell {
 
   function write(data: string): void {
     if (!started.value) return
-    window.bipane.pty.write(id, data)
+    window.mc.pty.write(id, data)
   }
 
   function noteInput(data: string): void {
@@ -196,7 +196,7 @@ export function createShell(id: string): Shell {
 
   function resize(cols: number, rows: number): void {
     if (!started.value) return
-    window.bipane.pty.resize(id, cols, rows)
+    window.mc.pty.resize(id, cols, rows)
   }
 
   function attachTerminal(
@@ -224,7 +224,7 @@ export function createShell(id: string): Shell {
     idle.value = false
     // Main reaps sessions when the window goes away, so this only needs to
     // cover a workspace the user closed while the app keeps running.
-    window.bipane.pty.kill(id)
+    window.mc.pty.kill(id)
   }
 
   return {

@@ -1,4 +1,4 @@
-# Bipane
+# Monda Commander
 
 A modern orthodox (dual-pane) file manager with a VSCode-inspired UI.
 Electron + electron-vite + Vue 3 + TypeScript + Tailwind v4.
@@ -39,7 +39,7 @@ src/main/videoCodec.ts   header-only codec sniff for the containers Chromium
                          sample description, so the HEVC of a phone recording is
                          told from H.264; only box headers are read, and nothing
                          that fails to parse is an error — it answers null
-src/main/media.ts        the bipane-media scheme a pane plays a video through: a
+src/main/media.ts        the mc-media scheme a pane plays a video through: a
                          ranged byte stream, so the element fetches the metadata
                          and the frames it needs rather than a hundred-megabyte
                          file; and, for what Chromium cannot play, a live encode
@@ -51,10 +51,10 @@ src/main/ipc/watch.ts    IPC: fs:watch, fs:unwatch; pushes fs:changed when a
                          watched directory's contents change (fs.watch = inotify)
 src/main/ipc/pty.ts      IPC: pty:create/write/resize/kill/state, pushes pty:data, pty:exit
 src/main/ipc/window.ts   IPC: window:minimize/toggle-maximize/close/is-maximized
-src/preload/index.ts     contextBridge -> window.bipane (implements BipaneApi)
+src/preload/index.ts     contextBridge -> window.mc (implements McApi)
 src/shared/types.ts      DirEntry/DirListing/Result/ImagePreview/PixelSize/
                          Pty* types (main + renderer)
-src/shared/api.ts        BipaneApi interface (the preload contract)
+src/shared/api.ts        McApi interface (the preload contract)
 src/shared/image.ts      extension -> previewable image MIME map, shared so the
                          renderer and main agree on what a footer may preview
 src/shared/video.ts      the same for video, plus the extensions only ffmpeg
@@ -198,7 +198,7 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   Moving the window depends on `-webkit-app-region`: the header is
   `drag-region` and interactive children must be `no-drag`, otherwise a new
   control silently swallows clicks. Both are `@utility` rules in `main.css`.
-  Window controls go through `window.bipane.win`; main broadcasts
+  Window controls go through `window.mc.win`; main broadcasts
   `window:maximized-change` so the maximize/restore icon stays in sync.
   Double-clicking the bar toggles maximize, and it must key off `button`
   targets, not `no-drag` ones: the tab strip is a `no-drag` `flex-1` child, so
@@ -406,7 +406,7 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   is given back.
 - **A pane footer plays the video under its cursor, silently.** A video cannot
   be read whole the way an image can — one frame's worth is a hundred megabytes
-  here — so main serves it as a ranged byte stream on its own `bipane-media`
+  here — so main serves it as a ranged byte stream on its own `mc-media`
   scheme (`src/main/media.ts`) and the footer mounts a `<video>` on it. The
   element is muted — it is the *display*, not the thumbnail, that makes a sound
   when a clip is enlarged — and it plays once rather than looping: a looping 4K clip decodes for as long as the cursor happens to rest
@@ -630,7 +630,7 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   an old camcorder AVI or the WMV3/VC-1 of an ASF one — `canPlayType` answers no
   for every one of them — so `src/shared/video.ts` keeps a second extension list
   of what only ffmpeg can make playable, and main encodes those into H.264 for
-  the same `bipane-media` stream (at most 720px wide, with its sound: a footer
+  the same `mc-media` stream (at most 720px wide, with its sound: a footer
   thumbnail is muted by the element that plays it, but a display is heard).
   The encode is streamed out **as it is produced** (`empty_moov` +
   `frag_keyframe`, a keyframe every thirty frames, straight to the response with
@@ -653,7 +653,7 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   `Enter` opens them in the system player, exactly as before that list existed.
   That list is not the only way in to this encode, either: a container Chromium
   demuxes but cannot decode reaches it too (see the next note).
-  `BIPANE_FFMPEG` names the binary for a machine that keeps it off the PATH.
+  `MC_FFMPEG` names the binary for a machine that keeps it off the PATH.
 - **A container Chromium demuxes is not a stream Chromium decodes, and only the
   header can tell the two apart.** An `.mp4` off a phone is HEVC as often as it
   is H.264, and HEVC is the one codec Chromium reaches *only* through a platform
@@ -890,7 +890,7 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   surface stay the app's own.
 - The renderer has a CSP in `src/renderer/index.html`. Dev-only allowances
   (`ws://localhost:*`, `'unsafe-inline'` styles) are required for Vite HMR, and
-  `img-src data:` / `media-src bipane-media:` are what let a footer show a
+  `img-src data:` / `media-src mc-media:` are what let a footer show a
   preview the renderer has no URL of its own for.
 
 ## Verifying changes in dev
@@ -907,7 +907,7 @@ conclusion at least once, so treat them as required steps.
 - **Restarting `npm run dev` leaves instances behind.** Stopping the npm/npx
   wrapper can leave `electron-vite` and Electron running, which keeps port 5173
   held; the next start then silently falls back to **5174** and you now have two
-  windows titled `Bipane`. Window tools address them by title, so `xdotool` and
+  windows titled `Monda Commander`. Window tools address them by title, so `xdotool` and
   `import` can type into one window and screenshot another. Check by **port**,
   not process count — a single `npx electron-vite` chain already matches ~4
   processes:
@@ -917,8 +917,8 @@ conclusion at least once, so treat them as required steps.
   Clean up scoped by project path, and use a bracketed pattern so `pkill`
   does not match its own command line (it will otherwise kill your shell):
   ```bash
-  for pid in $(pgrep -f "electron-[v]ite dev"; pgrep -f "bipane/node_modules/[e]lectron"); do
-    case "$(readlink /proc/$pid/cwd 2>/dev/null)" in *bipane*) kill "$pid";; esac
+  for pid in $(pgrep -f "electron-[v]ite dev"; pgrep -f "monda-commander/node_modules/[e]lectron"); do
+    case "$(readlink /proc/$pid/cwd 2>/dev/null)" in *monda-commander*) kill "$pid";; esac
   done
   ```
 - **The display is 2x scaled.** `xdotool getwindowgeometry` and `import` report
@@ -934,7 +934,7 @@ conclusion at least once, so treat them as required steps.
   - `xdotool` clicks land on whatever window is stacked under the pointer, so
     raise and activate first. `Input.dispatchMouseEvent` respects hit-testing
     (drag regions included) and is the reliable option.
-- **`window.bipane.pty.state('ws-1')` is the fastest health check.** A live
+- **`window.mc.pty.state('ws-1')` is the fastest health check.** A live
   shell reports a `cwd`; `cwd: null` means the session has exited, so any typing
   afterwards proves nothing. Workspace sessions are `ws-1`, `ws-2`, ... in
   creation order.
@@ -946,7 +946,7 @@ conclusion at least once, so treat them as required steps.
 ## Conventions
 
 - Keep filesystem and pty access in the main process; the renderer only talks
-  to `window.bipane`. Never enable `nodeIntegration`.
+  to `window.mc`. Never enable `nodeIntegration`.
 - IPC handlers return `Result<T>` instead of throwing across the bridge.
 - The security model is contextIsolation on, nodeIntegration off, and the
   preload exposes a narrow, explicitly typed surface.

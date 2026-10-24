@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
-import type { BipaneApi } from '@shared/api'
+import type { McApi } from '@shared/api'
 import type {
   CopyOutcome,
   DeleteOutcome,
@@ -15,7 +15,7 @@ import type {
   Result
 } from '@shared/types'
 
-const api: BipaneApi = {
+const api: McApi = {
   fs: {
     home: () => ipcRenderer.invoke('fs:home'),
     list: (dir: string): Promise<Result<DirListing>> => ipcRenderer.invoke('fs:list', dir),
@@ -89,4 +89,4 @@ const api: BipaneApi = {
   }
 }
 
-contextBridge.exposeInMainWorld('bipane', api)
+contextBridge.exposeInMainWorld('mc', api)

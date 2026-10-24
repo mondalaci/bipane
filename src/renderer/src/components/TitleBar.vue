@@ -5,8 +5,8 @@ const maximized = ref(false)
 let unsubscribe: (() => void) | null = null
 
 onMounted(async () => {
-  maximized.value = await window.bipane.win.isMaximized()
-  unsubscribe = window.bipane.win.onMaximizedChange((value) => {
+  maximized.value = await window.mc.win.isMaximized()
+  unsubscribe = window.mc.win.onMaximizedChange((value) => {
     maximized.value = value
   })
 })
@@ -17,15 +17,15 @@ onBeforeUnmount(() => {
 })
 
 function minimize(): void {
-  void window.bipane.win.minimize()
+  void window.mc.win.minimize()
 }
 
 function toggleMaximize(): void {
-  void window.bipane.win.toggleMaximize()
+  void window.mc.win.toggleMaximize()
 }
 
 function close(): void {
-  void window.bipane.win.close()
+  void window.mc.win.close()
 }
 
 function onDoubleClick(event: MouseEvent): void {

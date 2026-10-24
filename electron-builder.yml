@@ -1,5 +1,5 @@
-appId: com.bipane.app
-productName: Bipane
+appId: com.monda.commander
+productName: Monda Commander
 directories:
   output: release
   buildResources: build

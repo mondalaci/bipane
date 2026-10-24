@@ -298,14 +298,14 @@ function cancelPreviewRead(): void {
  * the picture's real shape as soon as the row is reached.
  */
 async function loadImageSizeHint(token: number, path: string): Promise<void> {
-  const hint = await window.bipane.fs.imageSize(path)
+  const hint = await window.mc.fs.imageSize(path)
   if (token !== previewToken) return
   sizeHint.value = hint
   previewState.value = 'loading'
 }
 
 async function loadImage(token: number, path: string): Promise<void> {
-  const result = await window.bipane.fs.readImage(path)
+  const result = await window.mc.fs.readImage(path)
   if (token !== previewToken) return
   frame.value = result.ok ? result.data.dataUrl : null
   if (result.ok) previewState.value = 'ready'
@@ -899,7 +899,7 @@ async function loadStage(stage: StageRequest): Promise<void> {
   stageState.value = key === null ? 'idle' : 'loading'
   if (stage.target.kind !== 'image') return
 
-  const result = await window.bipane.fs.readImage(stage.target.path)
+  const result = await window.mc.fs.readImage(stage.target.path)
   if (token !== stageToken) return
   if (result.ok) stageFrame.value = result.data.dataUrl
   else stageState.value = 'failed'
@@ -1279,7 +1279,7 @@ function ensureClipLength(target: PreviewTarget): void {
   const key = previewKeyFor(target)
   if (key === null || key === clipLengthKey) return
   clipLengthKey = key
-  void window.bipane.fs.videoDuration(target.path).then((seconds) => {
+  void window.mc.fs.videoDuration(target.path).then((seconds) => {
     if (clipLengthKey !== key) return
     clipLength.value = seconds
   })
@@ -1292,7 +1292,7 @@ function ensureStageLength(target: PreviewTarget): void {
   const key = previewKeyFor(target)
   if (key === null || key === stageClipLengthKey) return
   stageClipLengthKey = key
-  void window.bipane.fs.videoDuration(target.path).then((seconds) => {
+  void window.mc.fs.videoDuration(target.path).then((seconds) => {
     if (stageClipLengthKey !== key) return
     stageClipLength.value = seconds
   })

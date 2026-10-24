@@ -1,5 +1,5 @@
 {
-  "name": "bipane",
+  "name": "monda-commander",
   "version": "0.1.0",
   "description": "A modern orthodox (dual-pane) file manager",
   "main": "./out/main/index.js",
