@@ -591,10 +591,28 @@ function shellQuote(text: string): string {
 }
 
 /**
- * Alt+Enter puts the entry under the cursor on the command line, Alt+A its
- * full path. Both are typed into the shell's own line (the collapsed strip),
- * exactly as if the user had typed them, so the shell's echo, history and
- * editing keys all see a real line rather than a value set behind its back.
+ * A directory path closed with its separator (`/home/laci/`). The root is
+ * already closed, so it is left alone rather than doubled.
+ */
+function closeDirectory(dir: string): string {
+  return /[/\\]$/.test(dir) ? dir : `${dir}/`
+}
+
+/**
+ * Alt+Enter puts the entry under the cursor on the command line, Alt+A the
+ * directory holding it, closed with a separator. Both are typed into the
+ * shell's own line (the collapsed strip), exactly as if the user had typed
+ * them, so the shell's echo, history and editing keys all see a real line
+ * rather than a value set behind its back.
+ *
+ * The directory rather than the entry's own path, because the line is where a
+ * command is typed and a folder is what a command is usually handed: the
+ * cursor on a file is a way of saying where that file lives. The closing
+ * separator is what keeps a pasted path a folder — the shell reads a path
+ * closed this way as one it can go on completing *inside*, while the same path
+ * bare could be taken for the entry itself and leave Tab nothing to offer.
+ * The directory is the pane's own (the resolved one the entries were listed
+ * from), so the entry's path only differs from it by the name.
  */
 function pasteEntryName(): void {
   const entry = activePane.value.current()
@@ -605,7 +623,7 @@ function pasteEntryName(): void {
 function pasteEntryPath(): void {
   const entry = activePane.value.current()
   if (!entry || entry.isParent) return
-  shell.value.sendInput(shellQuote(entry.path))
+  shell.value.sendInput(shellQuote(closeDirectory(activePane.value.state.path)))
 }
 
 /**
@@ -1195,8 +1213,9 @@ function onKeydown(event: KeyboardEvent): void {
   }
 
   // Alt+Enter and Alt+A paste the cursor's entry onto the command line: its
-  // name and its full path. Claimed globally, like Alt+S, so they work wherever
-  // the keyboard is — the collapsed strip is the shell's own line either way.
+  // name, and the directory holding it closed with a separator. Claimed
+  // globally, like Alt+S, so they work wherever the keyboard is — the collapsed
+  // strip is the shell's own line either way.
   const isPasteName =
     event.altKey &&
     !event.ctrlKey &&
