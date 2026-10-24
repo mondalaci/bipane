@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
+// The app mark, inlined so it stays a data: URL the renderer's CSP allows.
+import logo from '@renderer/assets/monda-commander.png?inline'
 
 const maximized = ref(false)
 let unsubscribe: (() => void) | null = null
@@ -41,18 +43,7 @@ function onDoubleClick(event: MouseEvent): void {
     @dblclick="onDoubleClick"
   >
     <div class="flex shrink-0 items-center gap-2 pl-3">
-      <svg
-        viewBox="0 0 24 24"
-        class="h-3.5 w-3.5 text-accent-strong"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.8"
-        stroke-linecap="round"
-        aria-hidden="true"
-      >
-        <rect x="2.5" y="4.5" width="19" height="15" rx="2" />
-        <path d="M12 4.5v15" />
-      </svg>
+      <img :src="logo" alt="" aria-hidden="true" class="h-4 w-4 select-none" draggable="false" />
     </div>
 
     <div class="no-drag ml-3 flex min-w-0 items-center">
