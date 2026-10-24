@@ -8,6 +8,7 @@ import TerminalPane from '@renderer/components/TerminalPane.vue'
 import WorkspaceTabs from '@renderer/components/WorkspaceTabs.vue'
 import TitleBar from '@renderer/components/TitleBar.vue'
 import FileViewer from '@renderer/components/FileViewer.vue'
+import { loadHideMode, toggleHideMode } from '@renderer/composables/useHideMode'
 import { createWorkspace, type Workspace } from '@renderer/composables/useWorkspace'
 import type { PaneController, PaneEntry } from '@renderer/composables/useDirectory'
 import {
@@ -1307,6 +1308,23 @@ function onKeydown(event: KeyboardEvent): void {
   // Expanded and focused means it is a real terminal: it owns the keyboard.
   if (terminalExpanded.value && terminalFocused.value) return
 
+  // Alt+. switches the hide mode off and on. It is claimed here rather than with
+  // the global Alt keys above on purpose: in a real terminal Alt+. is readline's
+  // yank-last-arg, and the shell is welcome to it — this is a pane gesture, for
+  // the panes' own listing.
+  const isHideToggle =
+    event.altKey &&
+    !event.ctrlKey &&
+    !event.metaKey &&
+    !event.shiftKey &&
+    (event.code === 'Period' || event.key === '.')
+
+  if (isHideToggle) {
+    consume(event)
+    void toggleHideMode()
+    return
+  }
+
   handlePaneKey(event)
 }
 
@@ -1323,7 +1341,11 @@ window.addEventListener('keydown', onKeydown, { capture: true })
 window.addEventListener('focus', restoreFocus)
 document.addEventListener('focusout', onFocusDrop)
 
-onMounted(() => {
+onMounted(async () => {
+  // The remembered mode is asked for before the panes walk their first
+  // directory, so a folder with a `.mchide` file is listed the way the mode was
+  // left — rather than showing everything and hiding it a moment later.
+  await loadHideMode()
   for (const workspace of workspaces.value) void workspace.init()
   // What a file is previewable as depends on whether main can transcode what
   // Chromium cannot play, so the answer is asked for before any cursor lands.

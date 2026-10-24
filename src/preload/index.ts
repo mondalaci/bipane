@@ -86,6 +86,10 @@ const api: McApi = {
       ipcRenderer.on('window:maximized-change', listener)
       return () => ipcRenderer.off('window:maximized-change', listener)
     }
+  },
+  hide: {
+    get: (): Promise<boolean> => ipcRenderer.invoke('hide:get'),
+    set: (enabled: boolean): Promise<void> => ipcRenderer.invoke('hide:set', enabled)
   }
 }
 

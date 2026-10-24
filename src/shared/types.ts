@@ -24,6 +24,14 @@ export interface DirListing {
   path: string
   parent: string | null
   entries: DirEntry[]
+  /**
+   * The entry names this directory's `.mchide` file lists, one per line, in the
+   * order the file gives them. Empty when there is no such file, or none that can
+   * be read. Main returns every entry and lets the pane apply the list, because
+   * the mode can be switched off and on in the interface without reading the
+   * directory again.
+   */
+  hiddenNames: string[]
 }
 
 export interface FsError {

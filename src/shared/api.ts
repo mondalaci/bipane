@@ -94,8 +94,19 @@ export interface McWindowApi {
   onMaximizedChange(handler: (maximized: boolean) => void): () => void
 }
 
+export interface McHideApi {
+  /**
+   * Whether the hide mode is applied — the choice remembered from the last time
+   * it was toggled. A `.mchide` file says *what* a folder hides; this says
+   * whether the panes leave those entries out at all.
+   */
+  get(): Promise<boolean>
+  set(enabled: boolean): Promise<void>
+}
+
 export interface McApi {
   fs: McFsApi
   pty: McPtyApi
   win: McWindowApi
+  hide: McHideApi
 }

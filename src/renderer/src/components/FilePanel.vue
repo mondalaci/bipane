@@ -21,6 +21,8 @@ import {
 } from '@renderer/lib/preview'
 import FileIcon from '@renderer/components/FileIcon.vue'
 import PlaybackOsd from '@renderer/components/PlaybackOsd.vue'
+import { hideMode } from '@renderer/composables/useHideMode'
+import { HIDE_MODE_OFF_TOOLTIP, HIDE_MODE_TOOLTIP } from '@shared/hide'
 import { MEDIA_SCHEME } from '@shared/video'
 import type { PixelSize } from '@shared/types'
 
@@ -105,6 +107,13 @@ const VIEWPORT_FALLBACK_ROWS = 60
 // The footer mirrors the status of this pane's own cursor and marks.
 const entry = computed(() => props.controller.current())
 const selectedCount = computed(() => props.controller.selectedCount())
+
+/**
+ * Whether this directory has a hide list at all — a `.mchide` file naming
+ * entries. It is what puts the mode's icon in the title bar; whether that icon
+ * reads as on or off is the app-wide mode, which `hideMode` carries.
+ */
+const hideListed = computed(() => props.controller.state.hideNames.size > 0)
 
 /**
  * The row this pane's footer previews: the cursor row when it is a regular file
@@ -2433,14 +2442,54 @@ function onRenameBlur(): void {
         class="flex h-7 shrink-0 items-center gap-2 border-b border-border-subtle px-3"
         :class="active ? 'bg-accent text-fg-bright' : 'bg-surface text-fg-dim'"
       >
-        <span class="truncate font-mono text-ui-sm">
+        <span class="min-w-0 flex-1 truncate font-mono text-ui-sm">
           {{ controller.state.path || '—' }}
         </span>
         <span
           v-if="controller.state.loading"
-          class="ml-auto shrink-0 text-ui-sm text-fg-dim"
+          class="shrink-0 text-ui-sm text-fg-dim"
         >
           loading…
+        </span>
+        <!-- The mode is otherwise invisible: the rows it covers are simply not
+             there, so nothing in the listing says they were left out on purpose.
+             The icon is a state as much as a notice — the dim open eye is the
+             mode switched off in a folder that still has a list to apply. -->
+        <span
+          v-if="hideListed"
+          class="flex shrink-0 items-center"
+          :class="hideMode ? 'text-selected' : 'text-fg-dim'"
+          :title="hideMode ? HIDE_MODE_TOOLTIP : HIDE_MODE_OFF_TOOLTIP"
+          aria-hidden="true"
+        >
+          <svg
+            v-if="hideMode"
+            viewBox="0 0 24 24"
+            class="h-3.5 w-3.5"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path
+              d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"
+            />
+            <line x1="1" y1="1" x2="23" y2="23" />
+          </svg>
+          <svg
+            v-else
+            viewBox="0 0 24 24"
+            class="h-3.5 w-3.5"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
         </span>
       </div>
 

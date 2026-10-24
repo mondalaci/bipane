@@ -60,6 +60,9 @@ src/main/ipc/watch.ts    IPC: fs:watch, fs:unwatch; pushes fs:changed when a
                          watched directory's contents change (fs.watch = inotify)
 src/main/ipc/pty.ts      IPC: pty:create/write/resize/kill/state, pushes pty:data, pty:exit
 src/main/ipc/window.ts   IPC: window:minimize/toggle-maximize/close/is-maximized
+src/main/ipc/hide.ts     IPC: hide:get, hide:set — the hide mode's on/off state
+src/main/hideMode.ts     that state, kept in userData/hide-mode.json so the mode
+                         is remembered from one launch to the next
 src/preload/index.ts     contextBridge -> window.mc (implements McApi)
 src/shared/types.ts      DirEntry/DirListing/Result/ImagePreview/PixelSize/
                          Pty* types (main + renderer)
@@ -69,13 +72,17 @@ src/shared/image.ts      extension -> previewable image MIME map, shared so the
 src/shared/video.ts      the same for video, plus the extensions only ffmpeg
                          can make playable, the codecs Chromium decodes itself,
                          and the media scheme's name
+src/shared/hide.ts       the `.mchide` file's name, the key that toggles the mode,
+                         and the two tooltips the title bar's icon shows — shared
+                         so the file and the gesture are named in one place
 src/renderer/src/App.vue global keyboard model, workspace stack, layout, focus
 src/renderer/src/components/TitleBar.vue     frameless title bar + window controls;
                                              hosts the workspace tab strip
 src/renderer/src/components/WorkspaceTabs.vue the tab strip, rendered inside the
                                              title bar (select/close/new)
 src/renderer/src/components/FilePanel.vue    one pane: path bar, list, footer
-                                             (the footer previews the cursor's
+                                             (the path bar carries the hide mode's
+                                             icon; the footer previews the cursor's
                                              image, and plays its video; the whole
                                              pane becomes a display when the other
                                              pane asks it to)
@@ -89,6 +96,9 @@ src/renderer/src/composables/useWorkspace.ts one tab: its two panes, its shell,
 src/renderer/src/composables/useShell.ts     createShell(id): one shell session
                                              (own process, buffer, cwd, line model)
 src/renderer/src/composables/useDirectory.ts per-pane navigation state + actions
+src/renderer/src/composables/useHideMode.ts  the hide mode's on/off state, one
+                                             module-level ref shared by every
+                                             pane, and the toggle Alt+. drives
 src/renderer/src/lib/format.ts               size/date/permission formatting
 src/renderer/src/lib/executable.ts           what a row's green name means: a file with an
                                              exec bit whose name the icon table does not
@@ -164,7 +174,11 @@ is how the shell reads a path as a folder it can go on completing inside (both
 shell-quoted when
 they contain anything the shell would act on, so a space or a `$` arrives as
 part of the one argument, and both typed into the shell's own line so its echo
-and history see a real command line), `F5` copies the marked entries (or the
+and history see a real command line), `Alt+.` switches the hide mode off and on
+— a `.mchide` file in a folder lists entries for it to leave out, and the mode is
+one remembered state for the whole app, so the gesture is the panes' rather than
+the shell's: in a real terminal `Alt+.` stays readline's yank-last-arg — `F5`
+copies the marked entries (or the
 cursor row) into the other pane, `F6` moves them there (both take a destination
 field naming a directory to act into, but for a single entry a path that is not
 a directory is the entry's new name — so `blah` -> `blah2` renames or copies to
@@ -261,6 +275,38 @@ alone so it edits the line, and reaching the parent is the `..` row's job.
   editor's write/rename) emits a burst of inotify events — and a pure trailing
   debounce never fires while events keep arriving, which is exactly a download
   streaming a `.crdownload` file, so the pane stayed frozen until it finished.
+- **A `.mchide` file puts a directory in hide mode.** It is a list of names, one
+  entry per line; main's `listDirectory` reads it and reports those names in
+  `DirListing.hiddenNames`, and the *pane* is what leaves them out. Main does not
+  filter: the mode can be switched off and on in the interface, so the filter has
+  to be re-appliable without reading the folder again — `useDirectory` keeps the
+  whole listing in `state.allEntries` and rebuilds `state.allRows` from it
+  (`buildRows`), which is also why `toRows` takes entries and a parent rather
+  than a `DirListing`. Blank lines are skipped and each line trimmed, so a
+  Windows line ending or a stray space still matches. The file is filtered like
+  any other entry — naming itself in it hides it too — which is safe because
+  Alt+. is always there to reveal what the mode is covering, and the title bar's
+  icon still stands for the folder having a list. A *folder* called `.mchide` is
+  not the file, and an unreadable one lists nothing. A name that matches nothing
+  is simply a name: nothing is said about it.
+- **The hide mode is one state for the whole app, and it is remembered.** Alt+.
+  flips it (`toggleHideMode` in `composables/useHideMode.ts`), which is a
+  module-level ref — not per-pane state — so a toggle re-filters every pane,
+  including the tabs that are not on screen, and `useDirectory` watches it to
+  rebuild its rows and park the cursor on the entry it was on wherever that entry
+  survives. A mark for an entry the mode now covers is dropped (`pruneSelection`),
+  because a mark is a promise about what F5/F6/F8 act on and an invisible one
+  would make the footer's count disagree with those keys. The choice is written
+  through `hide:get`/`hide:set` to `userData/hide-mode.json` (`src/main/hideMode.ts`)
+  and read once on mount before the first listing, so it outlives the window and
+  a `.mchide` folder opens the way it was left rather than flashing its contents
+  first. The key is claimed *after* the expanded-terminal check on purpose: in a
+  real terminal Alt+. is readline's yank-last-arg, and the shell keeps it. The
+  icon in the pane title bar is the mode's state — gold eye-off while it is on, a
+  dim open eye while it is off, each with its own tooltip naming the file and the
+  key — and it appears wherever a folder has a list, so turning the mode off
+  leaves a place to see and undo that. The name, the key and both tooltips live
+  in `src/shared/hide.ts` so the file and the gesture are spelled one way.
 - **A refresh highlights what changed.** `useDirectory` diffs each re-list and
   marks entries that are new or whose size/mtime/kind changed into `fresh`;
   `FilePanel` puts `flash-row` on those rows, which runs the looping

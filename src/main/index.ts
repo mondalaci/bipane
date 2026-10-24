@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { app, BrowserWindow } from 'electron'
 import { registerFsHandlers } from './ipc/fs'
+import { registerHideHandlers } from './ipc/hide'
 import { killAllSessions, registerPtyHandlers } from './ipc/pty'
 import { closeAllWatchers, registerWatchHandlers } from './ipc/watch'
 import { registerWindowHandlers } from './ipc/window'
@@ -85,6 +86,7 @@ function createWindow(): BrowserWindow {
 registerMediaScheme()
 registerMediaHandlers()
 registerFsHandlers()
+registerHideHandlers()
 registerPtyHandlers()
 registerWatchHandlers()
 registerWindowHandlers()

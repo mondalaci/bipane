@@ -3,6 +3,7 @@ import type { FileHandle } from 'node:fs/promises'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { ipcMain, nativeImage, shell } from 'electron'
+import { HIDE_MARKER } from '@shared/hide'
 import { imageMimeFor } from '@shared/image'
 import { readImageSize } from '../imageSize'
 import type {
@@ -73,6 +74,35 @@ async function readEntry(dir: string, name: string): Promise<DirEntry> {
   }
 }
 
+/**
+ * The names a `.mchide` file lists — one per line — or null when the file cannot
+ * be read (missing, unreadable, a dangling symlink), in which case it lists
+ * nothing. Blank lines are skipped and each line is trimmed, so a Windows line
+ * ending or a stray space around a name still matches the entry it names.
+ */
+async function readHiddenNames(file: string): Promise<Set<string> | null> {
+  try {
+    const text = await fs.readFile(file, 'utf8')
+    const names = new Set<string>()
+    for (const line of text.split('\n')) {
+      const name = line.trim()
+      if (name) names.add(name)
+    }
+    return names
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Read a directory, together with the names its `.mchide` file lists — one per
+ * line. The names are reported rather than applied: the pane owns the hide mode
+ * (it can be switched off and on without touching the folder), so main's job is
+ * only to say what the file asked for. Blank lines are skipped and every line is
+ * trimmed, so a Windows line ending or a stray space still matches the entry it
+ * names. A folder called `.mchide` is not the file, and an unreadable one — a
+ * dangling symlink, a permission — lists nothing.
+ */
 export async function listDirectory(input: string): Promise<DirListing> {
   const dir = path.resolve(input)
   const dirents = await fs.readdir(dir, { withFileTypes: true })
@@ -84,8 +114,20 @@ export async function listDirectory(input: string): Promise<DirListing> {
     if (item.status === 'fulfilled') entries.push(item.value)
   }
 
+  // The file is looked up in the listing just read rather than by a separate
+  // stat, so a directory is never walked twice to answer one question.
+  const marker = entries.find(
+    (entry) => entry.name === HIDE_MARKER && entry.kind !== 'directory'
+  )
+  const names = marker ? await readHiddenNames(marker.path) : null
+
   const parent = path.dirname(dir)
-  return { path: dir, parent: parent === dir ? null : parent, entries }
+  return {
+    path: dir,
+    parent: parent === dir ? null : parent,
+    entries,
+    hiddenNames: names ? [...names] : []
+  }
 }
 
 /**

@@ -1,6 +1,7 @@
-import { onScopeDispose, reactive } from 'vue'
+import { onScopeDispose, reactive, watch } from 'vue'
+import { hideMode } from '@renderer/composables/useHideMode'
 import { shouldExecute } from '@renderer/lib/executable'
-import type { DirEntry, DirListing, PanelSide } from '@shared/types'
+import type { DirEntry, PanelSide } from '@shared/types'
 
 export type PaneEntry = DirEntry & { isParent?: boolean }
 
@@ -10,6 +11,18 @@ export interface PaneState {
   side: PanelSide
   path: string
   parent: string | null
+  /**
+   * The entry names the current directory's `.mchide` file lists. Non-empty means
+   * the folder has a hide list, which is what the title bar's icon stands for;
+   * these are the names the rows leave out while the mode is on.
+   */
+  hideNames: Set<string>
+  /**
+   * Every entry the last listing returned, the hidden ones included. The hide
+   * filter is applied on top of this rather than baked into it, so switching the
+   * mode is a re-filter of what is already in hand, not another read.
+   */
+  allEntries: DirEntry[]
   allRows: PaneEntry[]
   entries: PaneEntry[]
   itemCount: number
@@ -98,13 +111,18 @@ function sortEntries(entries: DirEntry[]): DirEntry[] {
   })
 }
 
-function toRows(listing: DirListing): PaneEntry[] {
-  const sorted = sortEntries(listing.entries)
-  if (!listing.parent) return sorted
+/**
+ * The rows for a set of entries: sorted, with the ".." row in front when there
+ * is somewhere to go. The entries handed in are already the ones the pane shows,
+ * so the hide filter has been applied by the caller.
+ */
+function toRows(entries: DirEntry[], parent: string | null): PaneEntry[] {
+  const sorted = sortEntries(entries)
+  if (!parent) return sorted
 
   const parentRow: PaneEntry = {
     name: PARENT_LABEL,
-    path: listing.parent,
+    path: parent,
     kind: 'directory',
     isSymlink: false,
     symlinkTarget: null,
@@ -185,6 +203,8 @@ export function useDirectory(side: PanelSide, options: PaneOptions): PaneControl
     side,
     path: '',
     parent: null,
+    hideNames: new Set<string>(),
+    allEntries: [],
     allRows: [],
     entries: [],
     itemCount: 0,
@@ -204,6 +224,47 @@ export function useDirectory(side: PanelSide, options: PaneOptions): PaneControl
   function current(): PaneEntry | undefined {
     return state.entries[state.cursor]
   }
+
+  /**
+   * The rows for the directory in hand, with the hide mode applied: the entries
+   * whose names the folder's `.mchide` file lists are left out while the mode is
+   * on. Built from `allEntries` rather than from a fresh read, so switching the
+   * mode costs a filter and nothing else.
+   */
+  function buildRows(): PaneEntry[] {
+    const names = state.hideNames
+    const entries =
+      hideMode.value && names.size > 0
+        ? state.allEntries.filter((entry) => !names.has(entry.name))
+        : state.allEntries
+    return toRows(entries, state.parent)
+  }
+
+  /**
+   * Drop marks for rows that are no longer on screen — an entry that left the
+   * directory, or one the hide mode is now covering. A mark is a promise about
+   * what F5/F6/F8 act on, and an invisible one would make the footer's count
+   * disagree with what those keys do.
+   */
+  function pruneSelection(): void {
+    if (state.selected.size === 0) return
+    const visible = new Set(state.allRows.map((row) => row.path))
+    for (const path of [...state.selected]) {
+      if (!visible.has(path)) state.selected.delete(path)
+    }
+  }
+
+  /**
+   * The mode is one answer for the whole app, so a toggle anywhere — in the other
+   * pane, or in a workspace that is not on screen — re-filters this pane's rows
+   * too, keeping the cursor on the entry it was on wherever that entry survives.
+   */
+  watch(hideMode, () => {
+    const previous = current()
+    state.allRows = buildRows()
+    pruneSelection()
+    applyFilter(previous)
+  })
 
   function clampCursorTo(value: number): number {
     const last = state.entries.length - 1
@@ -416,12 +477,16 @@ export function useDirectory(side: PanelSide, options: PaneOptions): PaneControl
       return
     }
 
-    const rows = toRows(result.data)
+    // The listing is kept whole; `buildRows` applies the hide filter on top of
+    // it, so the mode can be switched without reading the directory again.
     state.path = result.data.path
     state.parent = result.data.parent
+    state.allEntries = result.data.entries
+    state.hideNames = new Set(result.data.hiddenNames)
+    const rows = buildRows()
     state.allRows = rows
     state.entries = rows
-    state.itemCount = result.data.entries.length
+    state.itemCount = countRealRows(rows)
     state.cursor = focusPath ? indexOfPath(rows, focusPath) : 0
     state.scrollAlign = 'nearest'
     state.animateScroll = false
@@ -464,13 +529,18 @@ export function useDirectory(side: PanelSide, options: PaneOptions): PaneControl
     // listing as it was against the listing just read.
     const before = state.allRows
     const previous = current()
-    const rows = toRows(result.data)
     state.error = null
     state.path = result.data.path
     state.parent = result.data.parent
+    state.allEntries = result.data.entries
+    state.hideNames = new Set(result.data.hiddenNames)
+    const rows = buildRows()
     state.allRows = rows
     const anchor = focusPath ? rows.find((row) => row.path === focusPath) ?? previous : previous
     applyFilter(anchor)
+    // An entry the mode now covers carries no mark any more, exactly as one that
+    // left the directory does not.
+    pruneSelection()
     markFresh(diffEntries(before, rows))
     watchCurrent()
   }
